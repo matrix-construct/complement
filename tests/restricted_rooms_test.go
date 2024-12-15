@@ -106,6 +106,8 @@ func checkRestrictedRoom(t *testing.T, deployment complement.Deployment, alice *
 				Content: map[string]interface{}{
 					"membership":  "join",
 					"displayname": "Bobby",
+					// This should be ignored by the server since this is a join -> join transition
+					"join_authorised_via_users_server": "@unused:unused.local",
 				},
 			},
 		)
