@@ -557,10 +557,18 @@ func federationServer(cfg *config.Complement, h http.Handler) (*http.Server, str
 		Addr:    ":8448",
 		Handler: h,
 	}
-	tlsCertPath := path.Join(os.TempDir(), "complement.crt")
-	tlsKeyPath := path.Join(os.TempDir(), "complement.key")
-	certificateDuration := time.Hour
-	priv, err := rsa.GenerateKey(rand.Reader, 4096)
+	dirNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	dirNumber, err := rand.Int(rand.Reader, dirNumberLimit)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	os.MkdirAll(path.Join(os.TempDir(), dirNumber.String()), 0777)
+
+	tlsCertPath := path.Join(os.TempDir(), dirNumber.String(), "/", "complement.crt")
+	tlsKeyPath := path.Join(os.TempDir(), dirNumber.String(), "/", "complement.key")
+	certificateDuration := time.Hour * 48
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, "", "", err
 	}
