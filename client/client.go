@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/matrix-org/gomatrixserverlib"
+	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/tidwall/gjson"
 	"golang.org/x/crypto/curve25519"
 
@@ -139,7 +140,11 @@ func (c *CSAPI) CreateRoom(t ct.TestLike, body map[string]interface{}) *http.Res
 }
 
 // MustJoinRoom joins the room ID or alias given, else fails the test. Returns the room ID.
-func (c *CSAPI) MustJoinRoom(t ct.TestLike, roomIDOrAlias string, serverNames []string) string {
+//
+// Args:
+//   - `serverNames`: The list of servers to attempt to join the room through.
+//     These should be a resolvable addresses within the deployment network.
+func (c *CSAPI) MustJoinRoom(t ct.TestLike, roomIDOrAlias string, serverNames []spec.ServerName) string {
 	t.Helper()
 	res := c.JoinRoom(t, roomIDOrAlias, serverNames)
 	mustRespond2xx(t, res)
@@ -153,12 +158,19 @@ func (c *CSAPI) MustJoinRoom(t ct.TestLike, roomIDOrAlias string, serverNames []
 }
 
 // JoinRoom joins the room ID or alias given. Returns the raw http response
-func (c *CSAPI) JoinRoom(t ct.TestLike, roomIDOrAlias string, serverNames []string) *http.Response {
+//
+// Args:
+//   - `serverNames`: The list of servers to attempt to join the room through.
+//     These should be a resolvable addresses within the deployment network.
+func (c *CSAPI) JoinRoom(t ct.TestLike, roomIDOrAlias string, serverNames []spec.ServerName) *http.Response {
 	t.Helper()
 	// construct URL query parameters
-	query := make(url.Values, len(serverNames))
-	for _, serverName := range serverNames {
-		query.Add("server_name", serverName)
+	serverNameStrings := make([]string, len(serverNames))
+	for i, serverName := range serverNames {
+		serverNameStrings[i] = string(serverName)
+	}
+	query := url.Values{
+		"server_name": serverNameStrings,
 	}
 	// join the room
 	return c.Do(
@@ -353,6 +365,21 @@ func (c *CSAPI) SendRedaction(t ct.TestLike, roomID string, content map[string]i
 	txnID := int(atomic.AddInt64(&c.txnID, 1))
 	paths := []string{"_matrix", "client", "v3", "rooms", roomID, "redact", eventID, strconv.Itoa(txnID)}
 	return c.Do(t, "PUT", paths, WithJSONBody(t, content))
+}
+
+// MustGetStateEvent returns the event content for the given state event. Fails the test if the state event does not exist.
+func (c *CSAPI) MustGetStateEventContent(t ct.TestLike, roomID, eventType, stateKey string) (content gjson.Result) {
+	t.Helper()
+	res := c.GetStateEventContent(t, roomID, eventType, stateKey)
+	mustRespond2xx(t, res)
+	body := ParseJSON(t, res)
+	return gjson.ParseBytes(body)
+}
+
+// GetStateEvent returns the event content for the given state event. Use this form to detect absence via 404.
+func (c *CSAPI) GetStateEventContent(t ct.TestLike, roomID, eventType, stateKey string) *http.Response {
+	t.Helper()
+	return c.Do(t, "GET", []string{"_matrix", "client", "v3", "rooms", roomID, "state", eventType, stateKey})
 }
 
 // MustSendTyping marks this user as typing until the timeout is reached. If isTyping is false, timeout is ignored.
@@ -822,6 +849,7 @@ func (c *CSAPI) SendToDeviceMessages(t ct.TestLike, evType string, messages map[
 }
 
 func mustRespond2xx(t ct.TestLike, res *http.Response) {
+	t.Helper()
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		return // 2xx
 	}

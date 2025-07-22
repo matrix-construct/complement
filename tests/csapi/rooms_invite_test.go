@@ -9,6 +9,7 @@ import (
 	"github.com/matrix-org/complement/helpers"
 	"github.com/matrix-org/complement/match"
 	"github.com/matrix-org/complement/must"
+	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/tidwall/gjson"
 )
 
@@ -28,7 +29,7 @@ func TestRoomsInvite(t *testing.T) {
 			})
 			alice.MustInviteRoom(t, roomID, bob.UserID)
 			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(bob.UserID, roomID))
-			bob.MustJoinRoom(t, roomID, []string{})
+			bob.MustJoinRoom(t, roomID, []spec.ServerName{})
 			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(bob.UserID, roomID))
 			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(bob.UserID, roomID))
 		})
@@ -101,7 +102,7 @@ func TestRoomsInvite(t *testing.T) {
 
 			alice.MustInviteRoom(t, roomID, bob.UserID)
 			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(bob.UserID, roomID))
-			bob.MustJoinRoom(t, roomID, []string{})
+			bob.MustJoinRoom(t, roomID, []spec.ServerName{})
 			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(bob.UserID, roomID))
 
 			res := alice.InviteRoom(t, roomID, bob.UserID)
@@ -135,7 +136,7 @@ func TestRoomsInvite(t *testing.T) {
 			// Invite & join bob
 			alice.MustInviteRoom(t, roomID, bob.UserID)
 			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(bob.UserID, roomID))
-			bob.MustJoinRoom(t, roomID, []string{})
+			bob.MustJoinRoom(t, roomID, []spec.ServerName{})
 			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(bob.UserID, roomID))
 
 			// Raise the powerlevel
@@ -153,7 +154,7 @@ func TestRoomsInvite(t *testing.T) {
 			bob.MustInviteRoom(t, roomID, alice.UserID)
 			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(alice.UserID, roomID))
 			// Alice should be able to rejoin
-			alice.MustJoinRoom(t, roomID, []string{})
+			alice.MustJoinRoom(t, roomID, []spec.ServerName{})
 			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(alice.UserID, roomID))
 		})
 	})
@@ -175,12 +176,7 @@ func verifyState(t *testing.T, res gjson.Result, roomID string, cl *client.CSAPI
 		eventContent := event.Get("content." + field).Str
 		eventStateKey := event.Get("state_key").Str
 
-		res := cl.MustDo(t, "GET", []string{"_matrix", "client", "v3", "rooms", roomID, "state", eventType, eventStateKey})
-
-		must.MatchResponse(t, res, match.HTTPResponse{
-			JSON: []match.JSON{
-				match.JSONKeyEqual(field, eventContent),
-			},
-		})
+		content := cl.MustGetStateEventContent(t, roomID, eventType, eventStateKey)
+		must.MatchGJSON(t, content, match.JSONKeyEqual(field, eventContent))
 	}
 }
