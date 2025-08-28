@@ -191,7 +191,7 @@ func (r *Runner) Run(hs b.Homeserver, hsURL string) (resErr error) {
 func (r *Runner) runInstructionSet(contextStr string, hsURL string, instrs []instruction) error {
 	i := 0
 	cli := http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 90 * time.Second,
 	}
 	isFatalErr := func(err error) error {
 		if r.bestEffort {
