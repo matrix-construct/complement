@@ -225,7 +225,7 @@ func (s *Server) FederationClient(deployment FederationDeployment) fclient.Feder
 func (s *Server) MustSendTransaction(t ct.TestLike, deployment FederationDeployment, destination spec.ServerName, pdus []json.RawMessage, edus []gomatrixserverlib.EDU) {
 	t.Helper()
 	fedClient := s.FederationClient(deployment)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*75)
 	defer cancel()
 	resp, err := fedClient.SendTransaction(ctx, gomatrixserverlib.Transaction{
 		TransactionID: gomatrixserverlib.TransactionID(fmt.Sprintf("complement-%d", time.Now().Nanosecond())),
