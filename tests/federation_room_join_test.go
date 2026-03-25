@@ -553,6 +553,7 @@ func TestSendJoinPartialStateResponse(t *testing.T) {
 		"m.room.power_levels|",
 		"m.room.join_rules|",
 		"m.room.history_visibility|",
+		"m.room.guest_access|",
 		// Expect Alice and Bob's membership here because they're room heroes
 		"m.room.member|" + alice.UserID,
 		"m.room.member|" + bob.UserID,
