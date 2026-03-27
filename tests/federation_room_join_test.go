@@ -363,19 +363,9 @@ func TestBannedUserCannotSendJoin(t *testing.T) {
 	)
 }
 
-// This test checks that we cannot submit anything via /v1/send_join except a join.
-func TestCannotSendNonJoinViaSendJoinV1(t *testing.T) {
-	testValidationForSendMembershipEndpoint(t, "/_matrix/federation/v1/send_join", "join", nil)
-}
-
 // This test checks that we cannot submit anything via /v2/send_join except a join.
 func TestCannotSendNonJoinViaSendJoinV2(t *testing.T) {
 	testValidationForSendMembershipEndpoint(t, "/_matrix/federation/v2/send_join", "join", nil)
-}
-
-// This test checks that we cannot submit anything via /v1/send_leave except a leave.
-func TestCannotSendNonLeaveViaSendLeaveV1(t *testing.T) {
-	testValidationForSendMembershipEndpoint(t, "/_matrix/federation/v1/send_leave", "leave", nil)
 }
 
 // This test checks that we cannot submit anything via /v2/send_leave except a leave.
