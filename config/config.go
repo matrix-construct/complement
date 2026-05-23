@@ -53,6 +53,15 @@ type Complement struct {
 	// starting the container. Responsiveness is detected by `HEALTHCHECK` being healthy *and*
 	// the `/versions` endpoint returning 200 OK.
 	SpawnHSTimeout time.Duration
+	// Name: COMPLEMENT_DESTROY_HS_TIMEOUT_SECS
+	// Default: 1
+	// Description: The number of seconds to wait for a Homeserver container to shut down gracefully
+	// after a test finishes. The container is sent `SIGTERM` (or whatever its `STOPSIGNAL` is) and
+	// given this long to exit before being `SIGKILL`ed. Homeservers that need non-trivial time at
+	// shutdown (for example to flush an embedded database) should raise this value. The same timeout
+	// applies whether or not server logs are being printed; Complement no longer hard-kills the
+	// container on the non-logging path.
+	DestroyHSTimeout time.Duration
 	// Name: COMPLEMENT_CONTAINER_CPU_CORES
 	// Default: 0
 	// Description: The number of CPU cores available for the container to use (can be
@@ -158,6 +167,7 @@ func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
 	cfg.EnvVarsPropagatePrefix = os.Getenv("COMPLEMENT_SHARE_ENV_PREFIX")
 	cfg.PostTestScript = os.Getenv("COMPLEMENT_POST_TEST_SCRIPT")
 	cfg.SpawnHSTimeout = time.Duration(parseEnvWithDefault("COMPLEMENT_SPAWN_HS_TIMEOUT_SECS", 30)) * time.Second
+	cfg.DestroyHSTimeout = time.Duration(parseEnvWithDefault("COMPLEMENT_DESTROY_HS_TIMEOUT_SECS", 1)) * time.Second
 	if os.Getenv("COMPLEMENT_VERSION_CHECK_ITERATIONS") != "" {
 		fmt.Fprintln(os.Stderr, "Deprecated: COMPLEMENT_VERSION_CHECK_ITERATIONS will be removed in a later version. Use COMPLEMENT_SPAWN_HS_TIMEOUT_SECS instead which does the same thing and is clearer.")
 		// each iteration had a 50ms sleep between tries so the timeout is 50 * iteration ms
