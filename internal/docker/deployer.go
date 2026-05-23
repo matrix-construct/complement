@@ -32,7 +32,6 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/matrix-org/complement/internal"
-	complementRuntime "github.com/matrix-org/complement/runtime"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -217,26 +216,23 @@ func (d *Deployer) PrintLogs(dep *Deployment) {
 	}
 }
 
-// Destroy a deployment. This will kill all running containers.
+// Destroy a deployment. This will stop all running containers, allowing each up
+// to COMPLEMENT_DESTROY_HS_TIMEOUT_SECS to shut down cleanly before SIGKILL.
+// Tests that cannot afford a clean shutdown should not pass; hard-killing on
+// the success path also silently discards any at-exit work the homeserver
+// performs (metric dumps, profile output, embedded-db flushes).
 func (d *Deployer) Destroy(dep *Deployment, printServerLogs bool, testName string, failed bool) {
 	for _, hsDep := range dep.HS {
-		if printServerLogs {
-			// If we want the logs we gracefully stop the containers to allow
-			// the logs to be flushed.
-			oneSecond := 1
-			err := d.Docker.ContainerStop(context.Background(), hsDep.ContainerID, container.StopOptions{
-				Timeout: &oneSecond,
-			})
-			if err != nil {
-				log.Printf("Destroy: Failed to destroy container %s : %s\n", hsDep.ContainerID, err)
-			}
+		timeoutSecs := int(d.config.DestroyHSTimeout.Seconds())
+		err := d.Docker.ContainerStop(context.Background(), hsDep.ContainerID, container.StopOptions{
+			Timeout: &timeoutSecs,
+		})
+		if err != nil {
+			log.Printf("Destroy: Failed to stop container %s : %s\n", hsDep.ContainerID, err)
+		}
 
+		if printServerLogs {
 			printLogs(d.Docker, hsDep.ContainerID, hsDep.ContainerID)
-		} else {
-			err := complementRuntime.ContainerKillFunc(d.Docker, hsDep.ContainerID)
-			if err != nil {
-				log.Printf("Destroy: Failed to destroy container %s : %s\n", hsDep.ContainerID, err)
-			}
 		}
 
 		result, err := d.executePostScript(hsDep, testName, failed)
