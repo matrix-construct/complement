@@ -82,7 +82,7 @@ func (d *Deployer) log(str string, args ...interface{}) {
 // This homeserver should be added to the dirty deployment. The hsName should start as 'hs1', then
 // 'hs2' ... 'hsN'.
 func (d *Deployer) CreateDirtyServer(hsName string) (*HomeserverDeployment, error) {
-	networkName, err := createNetworkIfNotExists(d.Docker, d.config.PackageNamespace, "dirty")
+	networkName, err := createNetworkIfNotExists(d.Docker, d.config.RunID, d.config.PackageNamespace, "dirty")
 	if err != nil {
 		return nil, fmt.Errorf("CreateDirtyDeployment: %w", err)
 	}
@@ -92,7 +92,7 @@ func (d *Deployer) CreateDirtyServer(hsName string) (*HomeserverDeployment, erro
 		baseImageURI = uri
 	}
 
-	containerName := fmt.Sprintf("complement_%s_dirty_%s", d.config.PackageNamespace, hsName)
+	containerName := fmt.Sprintf("complement_%s_%s_dirty_%s", d.config.RunID, d.config.PackageNamespace, hsName)
 	hsDeployment, err := deployImage(
 		d.Docker, baseImageURI, containerName,
 		d.config.PackageNamespace, "", hsName, nil, "dirty",
@@ -143,6 +143,7 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
 		Filters: label(
 			"complement_pkg="+d.config.PackageNamespace,
 			"complement_blueprint="+blueprintName,
+			runFilter(d.config.RunID),
 		),
 	})
 	if err != nil {
@@ -151,7 +152,7 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
 	if len(images) == 0 {
 		return nil, fmt.Errorf("Deploy: No images have been built for blueprint %s", blueprintName)
 	}
-	networkName, err := createNetworkIfNotExists(d.Docker, d.config.PackageNamespace, blueprintName)
+	networkName, err := createNetworkIfNotExists(d.Docker, d.config.RunID, d.config.PackageNamespace, blueprintName)
 	if err != nil {
 		return nil, fmt.Errorf("Deploy: %w", err)
 	}
@@ -171,7 +172,7 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
 		asIDToRegistrationMap := asIDToRegistrationFromLabels(img.Labels)
 
 		// TODO: Make CSAPI port configurable
-		containerName := fmt.Sprintf("complement_%s_%s_%s_%d", d.config.PackageNamespace, d.DeployNamespace, contextStr, counter)
+		containerName := fmt.Sprintf("complement_%s_%s_%s_%s_%d", d.config.RunID, d.config.PackageNamespace, d.DeployNamespace, contextStr, counter)
 		deployment, err := deployImage(
 			d.Docker, img.ID, containerName,
 			d.config.PackageNamespace, blueprintName, hsName, asIDToRegistrationMap, contextStr, networkName, d.config,
@@ -380,6 +381,7 @@ func deployImage(
 			"complement_blueprint": blueprintName,
 			"complement_pkg":       pkgNamespace,
 			"complement_hs_name":   hsName,
+			runIDLabel:             cfg.RunID,
 		},
 	}, &container.HostConfig{
 		CapAdd: []string{"NET_ADMIN"}, // TODO : this should be some sort of option
