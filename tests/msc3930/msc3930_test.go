@@ -14,6 +14,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/matrix-org/complement"
 	"github.com/matrix-org/complement/helpers"
 	"github.com/matrix-org/complement/match"
@@ -25,6 +27,29 @@ const pollStartOneToOneRuleID = ".org.matrix.msc3930.rule.poll_start_one_to_one"
 const pollEndOneToOneRuleID = ".org.matrix.msc3930.rule.poll_end_one_to_one"
 const pollStartRuleID = ".org.matrix.msc3930.rule.poll_start"
 const pollEndRuleID = ".org.matrix.msc3930.rule.poll_end"
+
+// assertPollTypeCondition verifies the event-type condition of a poll push rule.
+// The condition may be serialized either as the legacy "event_match" kind (with
+// a "pattern" key) or as the "event_property_is" kind (with a "value" key) named
+// by MSC3930. For a literal event type both forms select the same events, so the
+// test accepts whichever shape the homeserver presents.
+func assertPollTypeCondition(t *testing.T, rule gjson.Result, wantType string) {
+	t.Helper()
+	for _, cond := range rule.Get("conditions").Array() {
+		if cond.Get("key").Str != "type" {
+			continue
+		}
+		switch cond.Get("kind").Str {
+		case "event_match":
+			must.Equal(t, cond.Get("pattern").Str, wantType, "event_match pattern on type")
+			return
+		case "event_property_is":
+			must.Equal(t, cond.Get("value").Str, wantType, "event_property_is value on type")
+			return
+		}
+	}
+	t.Fatalf("poll rule %q has no event_match or event_property_is condition on \"type\" (want %q)", rule.Get("rule_id").Str, wantType)
+}
 
 func TestPollsLocalPushRules(t *testing.T) {
 	deployment := complement.Deploy(t, 1)
@@ -48,11 +73,9 @@ func TestPollsLocalPushRules(t *testing.T) {
 			match.JSONKeyEqual("enabled", true),
 			// There should only be one condition defined for this type
 			match.JSONKeyEqual("conditions.#", 1),
-			// Check the contents of the first (and only) condition
-			match.JSONKeyEqual("conditions.0.kind", "event_match"),
-			match.JSONKeyEqual("conditions.0.key", "type"),
-			match.JSONKeyEqual("conditions.0.pattern", "org.matrix.msc3381.poll.response"),
 		)
+		// Check the contents of the first (and only) condition
+		assertPollTypeCondition(t, pollResponseRule, "org.matrix.msc3381.poll.response")
 
 		// This push rule creates a sound and notifies the user when a poll is started in a one-to-one room.
 		pollStartOneToOneRule := alice.MustGetPushRule(t, "global", "underride", pollStartOneToOneRuleID)
@@ -72,10 +95,9 @@ func TestPollsLocalPushRules(t *testing.T) {
 			match.JSONKeyEqual("conditions.#", 2),
 			// Check the condition that requires a room between two users
 			match.JSONKeyEqual("conditions.#(kind==\"room_member_count\").is", "2"),
-			// Check the condition that requires a poll start event
-			match.JSONKeyEqual("conditions.#(kind==\"event_match\").key", "type"),
-			match.JSONKeyEqual("conditions.#(kind==\"event_match\").pattern", "org.matrix.msc3381.poll.start"),
 		)
+		// Check the condition that requires a poll start event
+		assertPollTypeCondition(t, pollStartOneToOneRule, "org.matrix.msc3381.poll.start")
 
 		// This push rule creates a sound and notifies the user when a poll is ended in a one-to-one room.
 		pollEndOneToOneRule := alice.MustGetPushRule(t, "global", "underride", pollEndOneToOneRuleID)
@@ -95,10 +117,9 @@ func TestPollsLocalPushRules(t *testing.T) {
 			match.JSONKeyEqual("conditions.#", 2),
 			// Check the condition that requires a room between two users
 			match.JSONKeyEqual("conditions.#(kind==\"room_member_count\").is", "2"),
-			// Check the condition that requires a poll start event
-			match.JSONKeyEqual("conditions.#(kind==\"event_match\").key", "type"),
-			match.JSONKeyEqual("conditions.#(kind==\"event_match\").pattern", "org.matrix.msc3381.poll.end"),
 		)
+		// Check the condition that requires a poll end event
+		assertPollTypeCondition(t, pollEndOneToOneRule, "org.matrix.msc3381.poll.end")
 
 		// This push rule notifies the user when a poll is started in any room.
 		pollStartRule := alice.MustGetPushRule(t, "global", "underride", pollStartRuleID)
@@ -111,11 +132,9 @@ func TestPollsLocalPushRules(t *testing.T) {
 			match.JSONKeyEqual("enabled", true),
 			// There should only be one condition defined for this type
 			match.JSONKeyEqual("conditions.#", 1),
-			// Check the contents of the first (and only) condition
-			match.JSONKeyEqual("conditions.0.kind", "event_match"),
-			match.JSONKeyEqual("conditions.0.key", "type"),
-			match.JSONKeyEqual("conditions.0.pattern", "org.matrix.msc3381.poll.start"),
 		)
+		// Check the contents of the first (and only) condition
+		assertPollTypeCondition(t, pollStartRule, "org.matrix.msc3381.poll.start")
 
 		// This push rule notifies the user when a poll is ended in any room.
 		pollEndRule := alice.MustGetPushRule(t, "global", "underride", pollEndRuleID)
@@ -128,11 +147,9 @@ func TestPollsLocalPushRules(t *testing.T) {
 			match.JSONKeyEqual("enabled", true),
 			// There should only be one condition defined for this type
 			match.JSONKeyEqual("conditions.#", 1),
-			// Check the contents of the first (and only) condition
-			match.JSONKeyEqual("conditions.0.kind", "event_match"),
-			match.JSONKeyEqual("conditions.0.key", "type"),
-			match.JSONKeyEqual("conditions.0.pattern", "org.matrix.msc3381.poll.end"),
 		)
+		// Check the contents of the first (and only) condition
+		assertPollTypeCondition(t, pollEndRule, "org.matrix.msc3381.poll.end")
 
 		// The DM-specific rules for poll start and poll end should come before the rules that
 		// define behaviour for any room. We verify this by ensuring that the DM-specific rules
