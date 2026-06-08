@@ -80,6 +80,7 @@ func (d *Builder) removeNetworks() error {
 		Filters: label(
 			complementLabel,
 			"complement_pkg="+d.Config.PackageNamespace,
+			runFilter(d.Config.RunID),
 		),
 	})
 	if err != nil {
@@ -100,6 +101,7 @@ func (d *Builder) removeImages() error {
 		Filters: label(
 			complementLabel,
 			"complement_pkg="+d.Config.PackageNamespace,
+			runFilter(d.Config.RunID),
 		),
 	})
 	if err != nil {
@@ -150,6 +152,7 @@ func (d *Builder) removeContainers() error {
 		Filters: label(
 			complementLabel,
 			"complement_pkg="+d.Config.PackageNamespace,
+			runFilter(d.Config.RunID),
 		),
 	})
 	if err != nil {
@@ -171,6 +174,7 @@ func (d *Builder) ConstructBlueprintIfNotExist(bprint b.Blueprint) error {
 		Filters: label(
 			"complement_blueprint="+bprint.Name,
 			"complement_pkg="+d.Config.PackageNamespace,
+			runFilter(d.Config.RunID),
 		),
 	})
 	if err != nil {
@@ -206,6 +210,7 @@ func (d *Builder) ConstructBlueprint(bprint b.Blueprint) error {
 				complementLabel,
 				"complement_blueprint="+bprint.Name,
 				"complement_pkg="+d.Config.PackageNamespace,
+				runFilter(d.Config.RunID),
 			),
 		})
 		if err != nil {
@@ -236,7 +241,7 @@ func (d *Builder) ConstructBlueprint(bprint b.Blueprint) error {
 func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
 	d.log("Constructing blueprint '%s'", bprint.Name)
 
-	networkName, err := createNetworkIfNotExists(d.Docker, d.Config.PackageNamespace, bprint.Name)
+	networkName, err := createNetworkIfNotExists(d.Docker, d.Config.RunID, d.Config.PackageNamespace, bprint.Name)
 	if err != nil {
 		return []error{err}
 	}
@@ -335,7 +340,7 @@ func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
 		commit, err := d.Docker.ContainerCommit(context.Background(), res.containerID, client.ContainerCommitOptions{
 			Author:    "Complement",
 			NoPause:   false,
-			Reference: "localhost/complement:" + res.contextStr,
+			Reference: "localhost/complement_" + d.Config.RunID + ":" + res.contextStr,
 			Changes:   toChanges(labels),
 
 			// Podman's compatibility API returns a 500 if the POST request has an empty body, so we give it an empty
@@ -410,7 +415,7 @@ func (d *Builder) deployBaseImage(blueprintName string, hs b.Homeserver, context
 	}
 
 	return deployImage(
-		d.Docker, baseImageURI, fmt.Sprintf("complement_%s", contextStr),
+		d.Docker, baseImageURI, fmt.Sprintf("complement_%s_%s", d.Config.RunID, contextStr),
 		d.Config.PackageNamespace, blueprintName, hs.Name, asIDToRegistrationMap, contextStr,
 		networkName, d.Config,
 	)
@@ -437,12 +442,13 @@ func generateASRegistrationYaml(as b.ApplicationService) string {
 
 // createNetworkIfNotExists creates a docker network and returns its name.
 // Name is guaranteed not to be empty when err == nil
-func createNetworkIfNotExists(docker *client.Client, pkgNamespace, blueprintName string) (networkName string, err error) {
+func createNetworkIfNotExists(docker *client.Client, runID, pkgNamespace, blueprintName string) (networkName string, err error) {
 	// check if a network already exists for this blueprint
 	nws, err := docker.NetworkList(context.Background(), client.NetworkListOptions{
 		Filters: label(
 			"complement_pkg="+pkgNamespace,
 			"complement_blueprint="+blueprintName,
+			runFilter(runID),
 		),
 	})
 	if err != nil {
@@ -455,13 +461,14 @@ func createNetworkIfNotExists(docker *client.Client, pkgNamespace, blueprintName
 		}
 		return nws.Items[0].Name, nil
 	}
-	networkName = "complement_" + pkgNamespace + "_" + blueprintName
+	networkName = "complement_" + runID + "_" + pkgNamespace + "_" + blueprintName
 	// make a user-defined network so we get DNS based on the container name
 	nw, err := docker.NetworkCreate(context.Background(), networkName, client.NetworkCreateOptions{
 		Labels: map[string]string{
 			complementLabel:        blueprintName,
 			"complement_blueprint": blueprintName,
 			"complement_pkg":       pkgNamespace,
+			runIDLabel:             runID,
 		},
 	})
 	if err != nil {

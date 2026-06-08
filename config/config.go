@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -101,6 +102,15 @@ type Complement struct {
 
 	// The namespace for all complement created blueprints and deployments
 	PackageNamespace string
+
+	// Name: COMPLEMENT_RUN_ID
+	// Description: A token, unique per `go test` invocation, woven into every Docker container,
+	// network, and committed image name and added as a `complement_run_id` label on each. This
+	// lets several Complement runs share one Docker daemon without colliding on resource names or
+	// cleaning up each other's resources. If unset, a random token is generated, which is enough
+	// for a single run; concurrent runs against one daemon must each set a distinct value. Must be
+	// lowercase `[a-z0-9_]` because it is embedded in image repository names.
+	RunID string
 	// Certificate Authority generated values for this run of complement. Homeservers will use this
 	// as a base to derive their own signed Federation certificates.
 	CACertificate *x509.Certificate
@@ -155,6 +165,10 @@ type Complement struct {
 
 var hsRegex = regexp.MustCompile(`COMPLEMENT_BASE_IMAGE_(.+)=(.+)$`)
 
+// runIDRegex is the charset COMPLEMENT_RUN_ID must satisfy: it is embedded in docker image
+// repository names, which forbid uppercase and most punctuation.
+var runIDRegex = regexp.MustCompile(`^[a-z0-9_]+$`)
+
 func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
 	cfg := &Complement{BaseImageURIs: map[string]string{}}
 	cfg.BaseImageURI = os.Getenv("COMPLEMENT_BASE_IMAGE")
@@ -202,6 +216,13 @@ func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
 
 	cfg.PackageNamespace = pkgNamespace
 
+	cfg.RunID = os.Getenv("COMPLEMENT_RUN_ID")
+	if cfg.RunID == "" {
+		cfg.RunID = randomRunID()
+	} else if !runIDRegex.MatchString(cfg.RunID) {
+		panic("COMPLEMENT_RUN_ID must be lowercase [a-z0-9_]: it is embedded in docker image repository names")
+	}
+
 	// create CA certs and keys
 	if err := cfg.GenerateCA(); err != nil {
 		panic("Failed to generate CA certificate/key: " + err.Error())
@@ -220,6 +241,17 @@ func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
 	// HSPortBindingIP is fixed here, but used by homerunner to override.
 	cfg.HSPortBindingIP = "127.0.0.1"
 	return cfg
+}
+
+// randomRunID returns a fresh run identifier for a Complement invocation that did not set
+// COMPLEMENT_RUN_ID. The result is lowercase hex (12 chars) so it is safe to embed in a docker
+// image repository name, which forbids uppercase.
+func randomRunID() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("failed to generate random COMPLEMENT_RUN_ID: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func (c *Complement) GenerateCA() error {
