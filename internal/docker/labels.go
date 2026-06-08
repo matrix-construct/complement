@@ -19,6 +19,17 @@ func label(labelFilters ...string) filters.Args {
 	return f
 }
 
+// runIDLabel scopes a docker resource (container, network, or committed image) to a single
+// COMPLEMENT_RUN_ID. Concurrent `go test` invocations sharing one docker daemon stamp distinct
+// run IDs, so neither lists nor cleans up the other's resources.
+const runIDLabel = "complement_run_id"
+
+// runFilter returns the label match term that narrows a docker query to one run, for use as a
+// label(...) argument alongside the other resource filters.
+func runFilter(runID string) string {
+	return runIDLabel + "=" + runID
+}
+
 func tokensFromLabels(labels map[string]string) map[string]string {
 	userIDToToken := make(map[string]string)
 	for k, v := range labels {
