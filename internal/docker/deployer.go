@@ -169,6 +169,25 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
 		mu.Unlock()
 		contextStr := img.Labels["complement_context"]
 		hsName := img.Labels["complement_hs_name"]
+		// ImageList can return a committed blueprint image whose Summary.Labels
+		// are empty even though ImageInspect reports them (observed for images
+		// committed from a per-homeserver base-image override). Recover the
+		// context and homeserver name from the image tag, which reliably encodes
+		// "<repo>:<blueprint>.<hsName>", so the homeserver is registered under
+		// its real name and receives a correct SERVER_NAME.
+		if (contextStr == "" || hsName == "") && len(img.RepoTags) > 0 {
+			tag := img.RepoTags[0]
+			if c := strings.LastIndex(tag, ":"); c >= 0 {
+				if contextStr == "" {
+					contextStr = tag[c+1:]
+				}
+				if hsName == "" {
+					if d := strings.LastIndex(tag[c+1:], "."); d >= 0 {
+						hsName = tag[c+1:][d+1:]
+					}
+				}
+			}
+		}
 		asIDToRegistrationMap := asIDToRegistrationFromLabels(img.Labels)
 
 		// TODO: Make CSAPI port configurable
