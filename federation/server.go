@@ -221,7 +221,7 @@ func (s *Server) MustMakeRoom(t ct.TestLike, roomVer gomatrixserverlib.RoomVersi
 // FederationClient returns a client which will sign requests using this server's key.
 //
 // The requests will be routed according to the deployment map in `deployment`, which satisfies the RoundTripper interface.
-func (s *Server) FederationClient(deployment FederationDeployment) fclient.FederationClient {
+func (s *Server) FederationClient(deployment FederationDeployment, opts ...fclient.ClientOption) fclient.FederationClient {
 	if !s.listening {
 		ct.Fatalf(s.t, "FederationClient() called before Listen() - this is not supported because Listen() chooses a high-numbered port and thus changes the server name and thus changes the way federation requests are signed. Ensure you Listen() first!")
 	}
@@ -230,22 +230,31 @@ func (s *Server) FederationClient(deployment FederationDeployment) fclient.Feder
 		KeyID:      s.KeyID,
 		PrivateKey: s.Priv,
 	}
+	clientOpts := append([]fclient.ClientOption{fclient.WithTransport(deployment.RoundTripper())}, opts...)
 	fedClient := fclient.NewFederationClient(
 		[]*fclient.SigningIdentity{&identity},
-		fclient.WithTransport(deployment.RoundTripper()),
+		clientOpts...,
 	)
 	return fedClient
 }
 
+// sendTransactionTimeout bounds MustSendTransaction. Processing a transaction
+// can require the receiver to backfill missing prev_events and run state
+// resolution over a large graph before responding, which on an unoptimized
+// (debug) build takes far longer than the federation client's default timeout.
+// The ceiling is generous so the test measures correctness, not response
+// latency; an optimized build responds well within it.
+const sendTransactionTimeout = 10 * time.Minute
+
 // MustSendTransaction sends the given PDUs/EDUs to the target destination, returning an error if the /send fails or if the response contains an error
-// for any sent PDUs. Times out after 10 seconds.
+// for any sent PDUs.
 //
 // Args:
 //   - `destination`: This should be a resolvable addresses within the deployment network.
 func (s *Server) MustSendTransaction(t ct.TestLike, deployment FederationDeployment, destination spec.ServerName, pdus []json.RawMessage, edus []gomatrixserverlib.EDU) {
 	t.Helper()
-	fedClient := s.FederationClient(deployment)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*75)
+	fedClient := s.FederationClient(deployment, fclient.WithTimeout(sendTransactionTimeout))
+	ctx, cancel := context.WithTimeout(context.Background(), sendTransactionTimeout)
 	defer cancel()
 	resp, err := fedClient.SendTransaction(ctx, gomatrixserverlib.Transaction{
 		TransactionID: gomatrixserverlib.TransactionID(fmt.Sprintf("complement-%d", time.Now().Nanosecond())),
