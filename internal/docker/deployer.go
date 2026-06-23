@@ -390,6 +390,8 @@ func deployImage(
 		log.Printf("Sharing %v host environment variables with container", env)
 	}
 
+	capAdd := append([]string{"NET_ADMIN"}, cfg.TesteeCapAdd...)
+
 	body, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
 			Image: imageID,
@@ -404,7 +406,7 @@ func deployImage(
 			},
 		},
 		HostConfig: &container.HostConfig{
-			CapAdd: []string{"NET_ADMIN"}, // TODO : this should be some sort of option
+			CapAdd: capAdd,
 			// We use `PublishAllPorts` because although Complement only requires the ports 8008
 			// and 8448 to be accessible in the image, other custom out-of-repo tests may use
 			// additional ports that are specific to their own application.
