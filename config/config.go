@@ -93,6 +93,13 @@ type Complement struct {
 	// can optionally specify `:ro` to mount the path as readonly. A complete example with multiple mounts
 	// would look like `/host/a:/container/a:ro;/host/b:/container/b;/host/c:/container/c`
 	HostMounts []HostMount
+	// Name: COMPLEMENT_TESTEE_CAP_ADD
+	// Description: A comma separated list of extra Linux capabilities to add to every
+	// homeserver container on top of the defaults, for example `PERFMON,SYS_NICE`. This
+	// lets a testee run under `perf stat` (PERFMON, which the default seccomp profile keys
+	// its perf_event_open allowance on) or raise its scheduling priority (SYS_NICE). Empty
+	// by default.
+	TesteeCapAdd []string
 	// Name: COMPLEMENT_BASE_IMAGE_*
 	// Description: This allows you to override the base image used for a particular named homeserver.
 	// For example, `COMPLEMENT_BASE_IMAGE_HS1=complement-dendrite:latest` would use `complement-dendrite:latest`
@@ -199,6 +206,13 @@ func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
 		cfg.HostMounts, err = newHostMounts(strings.Split(hostMounts, ";"))
 		if err != nil {
 			panic("COMPLEMENT_HOST_MOUNTS parse error: " + err.Error())
+		}
+	}
+	if caps := os.Getenv("COMPLEMENT_TESTEE_CAP_ADD"); caps != "" {
+		for _, c := range strings.Split(caps, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cfg.TesteeCapAdd = append(cfg.TesteeCapAdd, c)
+			}
 		}
 	}
 	if cfg.BaseImageURI == "" {
