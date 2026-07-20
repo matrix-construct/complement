@@ -12,9 +12,20 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/tidwall/gjson v1.19.0
 	github.com/tidwall/sjson v1.2.5
-	golang.org/x/crypto v0.53.0
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+	golang.org/x/crypto v0.54.0
+	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597
 	gonum.org/v1/plot v0.17.0
+)
+
+require (
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/rs/zerolog v1.35.1 // indirect
+	go.mau.fi/util v0.9.12-0.20260719092501-f9c03d846391 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (
@@ -54,9 +65,10 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/image v0.38.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 	gotest.tools/v3 v3.0.3 // indirect
+	maunium.net/go/mautrix v0.29.0
 )
