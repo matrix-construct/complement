@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/matrix-org/complement"
 	"github.com/matrix-org/complement/b"
@@ -17,9 +18,16 @@ import (
 	"github.com/matrix-org/complement/helpers"
 	"github.com/matrix-org/complement/runtime"
 	"github.com/matrix-org/gomatrixserverlib"
+	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/tidwall/gjson"
 	"maunium.net/go/mautrix/id"
 )
+
+const complemauE2EKeyTimeout = 10 * time.Second
+
+var complemauE2EKeyFederationBlueprint = func() b.Blueprint {
+	return newComplemauInterestBlueprint("hs_with_complemau_e2e_key_federation", true)
+}()
 
 func TestComplemauAppserviceReceivesOTKCountsAndFallbackKeys(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite)
@@ -97,6 +105,265 @@ func TestComplemauAppserviceReceivesOTKCountsAndFallbackKeys(t *testing.T) {
 	)
 }
 
+func TestComplemauAppserviceServesOneTimeKeys(t *testing.T) {
+	runtime.SkipIf(t, runtime.Dendrite)
+
+	deployment := complement.OldDeploy(t, b.BlueprintHSWithComplemauBridge)
+	defer deployment.Destroy(t)
+
+	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+	bridgeUser := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
+	bridge := startComplemauBridge(t, bridgeUser.BaseURL)
+	defer bridge.stop()
+
+	const (
+		ghostUserID      = "@complemau_claim:hs1"
+		fallbackDevice   = "LOCAL_FALLBACK"
+		appserviceDevice = "AS_CLAIM"
+	)
+	bridge.mustCreateGhostDevice(t, ghostUserID, fallbackDevice, "Local fallback")
+	bridge.mustCreateGhostDevice(t, ghostUserID, appserviceDevice, "Appservice claim")
+	_, fallbackKey := uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, fallbackDevice, 0, true)
+	uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, appserviceDevice, 0, true)
+
+	asKeyID, asKey := generateComplemauOneTimeKey(t, bridgeUser, ghostUserID, appserviceDevice)
+	asResponse := map[string]interface{}{
+		ghostUserID: map[string]interface{}{
+			appserviceDevice: map[string]interface{}{asKeyID: asKey},
+		},
+	}
+	bridge.queueEndpointResponse(t, complemauKeyClaim, http.StatusOK, asResponse)
+	response := alice.MustDo(
+		t,
+		http.MethodPost,
+		[]string{"_matrix", "client", "v3", "keys", "claim"},
+		client.WithJSONBody(t, map[string]interface{}{
+			"one_time_keys": map[string]interface{}{
+				ghostUserID: map[string]string{
+					fallbackDevice:   "signed_curve25519",
+					appserviceDevice: "signed_curve25519",
+				},
+			},
+		}),
+	)
+
+	// Tuwunel currently never makes this MSC3983 request. Keep the receive
+	// strict so the known failure turns green only when OTK proxying lands.
+	request := bridge.mustReceiveEndpointRequest(t, complemauKeyClaim, complemauE2EKeyTimeout)
+	assertComplemauE2EEndpointRequest(
+		t,
+		request,
+		"/_matrix/app/unstable/org.matrix.msc3983/keys/claim",
+		map[string]interface{}{
+			ghostUserID: map[string]interface{}{
+				fallbackDevice:   []string{"signed_curve25519"},
+				appserviceDevice: []string{"signed_curve25519"},
+			},
+		},
+		b.BlueprintHSWithComplemauBridge.Homeservers[0].ApplicationServices[0].HSToken,
+	)
+
+	body := client.ParseJSON(t, response)
+	appserviceClaim := gjson.GetBytes(
+		body,
+		"one_time_keys."+client.GjsonEscape(ghostUserID)+"."+client.GjsonEscape(appserviceDevice),
+	)
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(appserviceClaim.Raw),
+		map[string]interface{}{asKeyID: asKey},
+	)
+	fallbackClaim := gjson.GetBytes(
+		body,
+		"one_time_keys."+client.GjsonEscape(ghostUserID)+"."+client.GjsonEscape(fallbackDevice),
+	)
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(fallbackClaim.Raw),
+		map[string]interface{}{"signed_curve25519:fallback": fallbackKey},
+	)
+	assertComplemauEmptyFailures(t, body)
+}
+
+func TestComplemauAppserviceServesDeviceKeys(t *testing.T) {
+	runtime.SkipIf(t, runtime.Dendrite)
+
+	deployment := complement.OldDeploy(t, b.BlueprintHSWithComplemauBridge)
+	defer deployment.Destroy(t)
+
+	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+	bridgeUser := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
+	bridge := startComplemauBridge(t, bridgeUser.BaseURL)
+	defer bridge.stop()
+
+	const (
+		ghostUserID      = "@complemau_key_query:hs1"
+		localDevice      = "LOCAL_ONLY"
+		overriddenDevice = "AS_OVERRIDE"
+		appserviceDevice = "AS_ONLY"
+	)
+	bridge.mustCreateGhostDevice(t, ghostUserID, localDevice, "Local device")
+	bridge.mustCreateGhostDevice(t, ghostUserID, overriddenDevice, "Overridden device")
+	localKeys, _ := uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, localDevice, 0, false)
+	uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, overriddenDevice, 0, false)
+
+	overriddenKeys := generateComplemauDeviceKeys(t, bridgeUser, ghostUserID, overriddenDevice)
+	appserviceKeys := generateComplemauDeviceKeys(t, bridgeUser, ghostUserID, appserviceDevice)
+	asResponse := map[string]interface{}{
+		"device_keys": map[string]interface{}{
+			ghostUserID: map[string]interface{}{
+				overriddenDevice: overriddenKeys,
+				appserviceDevice: appserviceKeys,
+			},
+		},
+	}
+	bridge.queueEndpointResponse(t, complemauKeyQuery, http.StatusOK, asResponse)
+	response := alice.MustDo(
+		t,
+		http.MethodPost,
+		[]string{"_matrix", "client", "v3", "keys", "query"},
+		client.WithJSONBody(t, map[string]interface{}{
+			"device_keys": map[string]interface{}{ghostUserID: []string{}},
+		}),
+	)
+
+	// Tuwunel currently never makes this MSC3984 request. This receive is the
+	// deliberate known failure until appservice device-key queries are wired.
+	request := bridge.mustReceiveEndpointRequest(t, complemauKeyQuery, complemauE2EKeyTimeout)
+	assertComplemauE2EEndpointRequest(
+		t,
+		request,
+		"/_matrix/app/unstable/org.matrix.msc3984/keys/query",
+		map[string]interface{}{ghostUserID: []string{}},
+		b.BlueprintHSWithComplemauBridge.Homeservers[0].ApplicationServices[0].HSToken,
+	)
+
+	body := client.ParseJSON(t, response)
+	devices := gjson.GetBytes(body, "device_keys."+client.GjsonEscape(ghostUserID))
+	if !devices.IsObject() || len(devices.Map()) != 3 {
+		t.Fatalf("complemau: merged device keys were %s, want exactly three devices", devices.Raw)
+	}
+	assertComplemauDeviceKeyEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(localDevice)).Raw),
+		localKeys,
+	)
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(overriddenDevice)).Raw),
+		overriddenKeys,
+	)
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(appserviceDevice)).Raw),
+		appserviceKeys,
+	)
+	assertComplemauEmptyFailures(t, body)
+}
+
+func TestComplemauAppserviceServesDeviceKeysOverFederation(t *testing.T) {
+	runtime.SkipIf(t, runtime.Dendrite)
+
+	deployment := complement.OldDeploy(t, complemauE2EKeyFederationBlueprint)
+	defer deployment.Destroy(t)
+
+	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+	remote := deployment.Register(t, "hs2", helpers.RegistrationOpts{})
+	bridgeUser := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
+	registration := complemauE2EKeyFederationBlueprint.Homeservers[0].ApplicationServices[0]
+	bridge := startComplemauBridgeWithRegistration(
+		t,
+		bridgeUser.BaseURL,
+		registration,
+		b.ComplemauASPort,
+	)
+	defer bridge.stop()
+
+	const (
+		ghostLocalpart   = "as_e2e_federated"
+		ghostUserID      = "@as_e2e_federated:hs1"
+		localDevice      = "FED_LOCAL"
+		appserviceDevice = "FED_AS_ONLY"
+	)
+	registerAppserviceGhost(t, bridgeUser, ghostLocalpart)
+	roomID := alice.MustCreateRoom(t, map[string]interface{}{
+		"preset": "public_chat",
+		"initial_state": []map[string]interface{}{
+			{
+				"type":      "m.room.encryption",
+				"state_key": "",
+				"content":   map[string]interface{}{"algorithm": "m.megolm.v1.aes-sha2"},
+			},
+		},
+	})
+	alice.MustInviteRoom(t, roomID, ghostUserID)
+	joinComplemauInterestUser(t, bridgeUser, roomID, ghostUserID)
+	remote.MustJoinRoom(t, roomID, []spec.ServerName{
+		deployment.GetFullyQualifiedHomeserverName(t, "hs1"),
+	})
+	_, since := remote.MustSync(t, client.SyncReq{})
+
+	overriddenKeys := generateComplemauDeviceKeys(t, bridgeUser, ghostUserID, localDevice)
+	appserviceKeys := generateComplemauDeviceKeys(t, bridgeUser, ghostUserID, appserviceDevice)
+	asResponse := map[string]interface{}{
+		"device_keys": map[string]interface{}{
+			ghostUserID: map[string]interface{}{
+				localDevice:      overriddenKeys,
+				appserviceDevice: appserviceKeys,
+			},
+		},
+	}
+	for range 4 {
+		bridge.queueEndpointResponse(t, complemauKeyQuery, http.StatusOK, asResponse)
+	}
+	bridge.mustCreateGhostDevice(t, ghostUserID, localDevice, "Federated local device")
+	uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, localDevice, 0, false)
+
+	// Tuwunel currently serves its database copy directly to federation. The
+	// strict receive is the known failure until the MSC3984 merge is added.
+	request := bridge.mustReceiveEndpointRequest(t, complemauKeyQuery, complemauE2EKeyTimeout)
+	assertComplemauE2EEndpointRequest(
+		t,
+		request,
+		"/_matrix/app/unstable/org.matrix.msc3984/keys/query",
+		map[string]interface{}{ghostUserID: nil},
+		registration.HSToken,
+	)
+	remote.MustSyncUntil(t, client.SyncReq{Since: since}, func(_ string, sync gjson.Result) error {
+		for _, userID := range sync.Get("device_lists.changed").Array() {
+			if userID.Str == ghostUserID {
+				return nil
+			}
+		}
+		return fmt.Errorf("device list for %s did not change", ghostUserID)
+	})
+
+	response := remote.MustDo(
+		t,
+		http.MethodPost,
+		[]string{"_matrix", "client", "v3", "keys", "query"},
+		client.WithJSONBody(t, map[string]interface{}{
+			"device_keys": map[string]interface{}{ghostUserID: []string{}},
+		}),
+	)
+	body := client.ParseJSON(t, response)
+	devices := gjson.GetBytes(body, "device_keys."+client.GjsonEscape(ghostUserID))
+	if !devices.IsObject() || len(devices.Map()) != 2 {
+		t.Fatalf("complemau: federated device keys were %s, want exactly two devices", devices.Raw)
+	}
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(localDevice)+".keys").Raw),
+		overriddenKeys["keys"],
+	)
+	assertComplemauJSONEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(appserviceDevice)+".keys").Raw),
+		appserviceKeys["keys"],
+	)
+	assertComplemauEmptyFailures(t, body)
+}
+
 func uploadComplemauOTKMaterial(
 	t *testing.T,
 	bridge *client.CSAPI,
@@ -104,7 +371,7 @@ func uploadComplemauOTKMaterial(
 	deviceID string,
 	count int,
 	includeFallback bool,
-) {
+) (map[string]interface{}, map[string]interface{}) {
 	t.Helper()
 	generatedCount := count
 	if includeFallback {
@@ -129,9 +396,10 @@ func uploadComplemauOTKMaterial(
 		"device_keys":   deviceKeys,
 		"one_time_keys": oneTimeKeys,
 	}
+	var fallbackKey map[string]interface{}
 	if includeFallback {
 		generatedKeyID := fmt.Sprintf("signed_curve25519:%d", count)
-		fallbackKey, ok := oneTimeKeys[generatedKeyID].(map[string]interface{})
+		fallbackKey, ok = oneTimeKeys[generatedKeyID].(map[string]interface{})
 		if !ok {
 			t.Fatalf("complemau: generated fallback key %s had an unexpected shape", generatedKeyID)
 		}
@@ -156,6 +424,7 @@ func uploadComplemauOTKMaterial(
 		client.WithJSONBody(t, body),
 		asUserDevice(userID, deviceID),
 	)
+	return deviceKeys, fallbackKey
 }
 
 func signComplemauKey(
@@ -266,5 +535,113 @@ func assertComplemauMSC3202Absent(t *testing.T, transaction *complemauTransactio
 		transaction.Body.MSC3202DeviceOTKCount != nil ||
 		transaction.Body.MSC3202FallbackKeys != nil {
 		t.Fatal("complemau: MSC3202 OTK data leaked to an appservice that did not opt in")
+	}
+}
+
+func generateComplemauOneTimeKey(
+	t *testing.T,
+	base *client.CSAPI,
+	userID string,
+	deviceID string,
+) (string, map[string]interface{}) {
+	t.Helper()
+	device := *base
+	device.UserID = userID
+	device.DeviceID = deviceID
+	_, oneTimeKeys := device.MustGenerateOneTimeKeys(t, 1)
+	for keyID, value := range oneTimeKeys {
+		key, ok := value.(map[string]interface{})
+		if !ok {
+			t.Fatalf("complemau: generated one-time key %s had an unexpected shape", keyID)
+		}
+		return keyID, key
+	}
+	t.Fatal("complemau: one-time-key generator returned no keys")
+	return "", nil
+}
+
+func generateComplemauDeviceKeys(
+	t *testing.T,
+	base *client.CSAPI,
+	userID string,
+	deviceID string,
+) map[string]interface{} {
+	t.Helper()
+	device := *base
+	device.UserID = userID
+	device.DeviceID = deviceID
+	deviceKeys, _ := device.MustGenerateOneTimeKeys(t, 0)
+	return deviceKeys
+}
+
+func assertComplemauE2EEndpointRequest(
+	t *testing.T,
+	request *complemauEndpointRequest,
+	wantPath string,
+	wantBody any,
+	hsToken string,
+) {
+	t.Helper()
+	if request.Method != http.MethodPost {
+		t.Errorf("complemau: appservice E2E request method = %s, want POST", request.Method)
+	}
+	if request.Path != wantPath {
+		t.Errorf("complemau: appservice E2E request path = %s, want %s", request.Path, wantPath)
+	}
+	// Tuwunel sends the legacy query token as well as the Bearer header.
+	accessTokens, hasAccessToken := request.Query["access_token"]
+	if len(request.Query) != 1 || !hasAccessToken || len(accessTokens) != 1 || accessTokens[0] != hsToken {
+		t.Errorf("complemau: appservice E2E query = %v, want only access_token with the HS token", request.Query)
+	}
+	wantAuthorization := "Bearer " + hsToken
+	authorization := request.Header.Values("Authorization")
+	if len(authorization) != 1 || authorization[0] != wantAuthorization {
+		t.Errorf("complemau: appservice E2E authorization = %v, want [%s]", authorization, wantAuthorization)
+	}
+	assertComplemauJSONEqual(t, request.Body, wantBody)
+}
+
+func assertComplemauJSONEqual(t *testing.T, got json.RawMessage, want any) {
+	t.Helper()
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("complemau: marshal expected JSON: %s", err)
+	}
+	gotCanonical, err := gomatrixserverlib.CanonicalJSON(got)
+	if err != nil {
+		t.Fatalf("complemau: canonicalize actual JSON %q: %s", got, err)
+	}
+	wantCanonical, err := gomatrixserverlib.CanonicalJSON(wantJSON)
+	if err != nil {
+		t.Fatalf("complemau: canonicalize expected JSON %q: %s", wantJSON, err)
+	}
+	if string(gotCanonical) != string(wantCanonical) {
+		t.Errorf("complemau: JSON = %s, want %s", gotCanonical, wantCanonical)
+	}
+}
+
+func assertComplemauDeviceKeyEqual(
+	t *testing.T,
+	got json.RawMessage,
+	want map[string]interface{},
+) {
+	t.Helper()
+	var gotDeviceKey map[string]interface{}
+	if err := json.Unmarshal(got, &gotDeviceKey); err != nil {
+		t.Fatalf("complemau: decode returned device key %q: %s", got, err)
+	}
+	delete(gotDeviceKey, "unsigned")
+	gotWithoutUnsigned, err := json.Marshal(gotDeviceKey)
+	if err != nil {
+		t.Fatalf("complemau: encode returned device key: %s", err)
+	}
+	assertComplemauJSONEqual(t, gotWithoutUnsigned, want)
+}
+
+func assertComplemauEmptyFailures(t *testing.T, body []byte) {
+	t.Helper()
+	failures := gjson.GetBytes(body, "failures")
+	if !failures.IsObject() || len(failures.Map()) != 0 {
+		t.Errorf("complemau: key response failures = %s, want an empty object", failures.Raw)
 	}
 }
