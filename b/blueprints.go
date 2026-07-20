@@ -78,6 +78,23 @@ type Room struct {
 	Events     []Event
 }
 
+// ApplicationServiceNamespace describes one regex in an appservice
+// registration namespace. Exclusive is always serialized, including when it is
+// false, because homeservers require the key to be present.
+type ApplicationServiceNamespace struct {
+	Regex     string
+	Exclusive bool
+}
+
+// ApplicationServiceNamespaces contains the three namespace classes from an
+// appservice registration. A nil Namespaces field on ApplicationService keeps
+// Complement's historical match-all, non-exclusive user namespace.
+type ApplicationServiceNamespaces struct {
+	Users   []ApplicationServiceNamespace
+	Aliases []ApplicationServiceNamespace
+	Rooms   []ApplicationServiceNamespace
+}
+
 type ApplicationService struct {
 	ID               string
 	HSToken          string
@@ -87,6 +104,9 @@ type ApplicationService struct {
 	RateLimited      bool
 	SendEphemeral    bool
 	EnableEncryption bool
+	EnableMSC4190    bool
+	Namespaces       *ApplicationServiceNamespaces
+	Protocols        []string
 }
 
 type Event struct {
