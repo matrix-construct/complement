@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/docker/docker/api/types/filters"
@@ -44,8 +45,7 @@ func asIDToRegistrationFromLabels(labels map[string]string) map[string]string {
 	asMap := make(map[string]string)
 	for k, v := range labels {
 		if strings.HasPrefix(k, "application_service_") {
-			// cf comment of generateASRegistrationYaml for ReplaceAll explanation
-			asMap[strings.TrimPrefix(k, "application_service_")] = strings.ReplaceAll(v, "\\n", "\n")
+			asMap[strings.TrimPrefix(k, "application_service_")] = decodeASRegistrationLabel(v)
 		}
 	}
 	return asMap
@@ -56,11 +56,28 @@ func labelsForApplicationServices(hs b.Homeserver) map[string]string {
 	// collect and store app service registrations as labels 'application_service_$as_id: $registration'
 	// collect and store app service access tokens as labels 'access_token_$sender_localpart: $as_token'
 	for _, as := range hs.ApplicationServices {
-		labels["application_service_"+as.ID] = generateASRegistrationYaml(as)
+		labels["application_service_"+as.ID] = encodeASRegistrationLabel(generateASRegistrationYaml(as))
 
 		labels["access_token_@"+as.SenderLocalpart+":"+hs.Name] = as.ASToken
 	}
 	return labels
+}
+
+const encodedASRegistrationPrefix = "base64:"
+
+func encodeASRegistrationLabel(registration string) string {
+	return encodedASRegistrationPrefix + base64.RawStdEncoding.EncodeToString([]byte(registration))
+}
+
+func decodeASRegistrationLabel(value string) string {
+	if !strings.HasPrefix(value, encodedASRegistrationPrefix) {
+		return strings.ReplaceAll(value, "\\n", "\n")
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(value, encodedASRegistrationPrefix))
+	if err != nil {
+		return value
+	}
+	return string(decoded)
 }
 
 func deviceIDsFromLabels(labels map[string]string) map[string]string {

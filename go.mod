@@ -15,6 +15,7 @@ require (
 	golang.org/x/crypto v0.54.0
 	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597
 	gonum.org/v1/plot v0.17.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -25,7 +26,6 @@ require (
 	github.com/rs/zerolog v1.35.1 // indirect
 	go.mau.fi/util v0.9.12-0.20260719092501-f9c03d846391 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (

@@ -26,6 +26,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"gopkg.in/yaml.v3"
 
 	"github.com/matrix-org/complement/b"
 	"github.com/matrix-org/complement/config"
@@ -420,24 +421,74 @@ func (d *Builder) deployBaseImage(blueprintName string, hs b.Homeserver, context
 	)
 }
 
-// Multilines label using Dockerfile syntax is unsupported, let's inline \n instead
+type applicationServiceNamespace struct {
+	Regex     string `yaml:"regex"`
+	Exclusive bool   `yaml:"exclusive"`
+}
+
+type applicationServiceNamespaces struct {
+	Users   []applicationServiceNamespace `yaml:"users"`
+	Rooms   []applicationServiceNamespace `yaml:"rooms"`
+	Aliases []applicationServiceNamespace `yaml:"aliases"`
+}
+
+type applicationServiceRegistration struct {
+	ID                     string                       `yaml:"id"`
+	HSToken                string                       `yaml:"hs_token"`
+	ASToken                string                       `yaml:"as_token"`
+	URL                    string                       `yaml:"url"`
+	SenderLocalpart        string                       `yaml:"sender_localpart"`
+	RateLimited            bool                         `yaml:"rate_limited"`
+	LegacyPushEphemeral    bool                         `yaml:"de.sorunome.msc2409.push_ephemeral"`
+	PushEphemeral          bool                         `yaml:"push_ephemeral"`
+	ReceiveEphemeral       bool                         `yaml:"receive_ephemeral"`
+	EnableEncryption       bool                         `yaml:"org.matrix.msc3202"`
+	EnableDeviceManagement bool                         `yaml:"io.element.msc4190"`
+	Namespaces             applicationServiceNamespaces `yaml:"namespaces"`
+	Protocols              []string                     `yaml:"protocols,omitempty"`
+}
+
 func generateASRegistrationYaml(as b.ApplicationService) string {
-	return fmt.Sprintf("id: %s\\n", as.ID) +
-		fmt.Sprintf("hs_token: %s\\n", as.HSToken) +
-		fmt.Sprintf("as_token: %s\\n", as.ASToken) +
-		fmt.Sprintf("url: '%s'\\n", as.URL) +
-		fmt.Sprintf("sender_localpart: %s\\n", as.SenderLocalpart) +
-		fmt.Sprintf("rate_limited: %v\\n", as.RateLimited) +
-		fmt.Sprintf("de.sorunome.msc2409.push_ephemeral: %v\\n", as.SendEphemeral) +
-		fmt.Sprintf("push_ephemeral: %v\\n", as.SendEphemeral) +
-		fmt.Sprintf("receive_ephemeral: %v\\n", as.SendEphemeral) +
-		fmt.Sprintf("org.matrix.msc3202: %v\\n", as.EnableEncryption) +
-		"namespaces:\\n" +
-		"  users:\\n" +
-		"    - exclusive: false\\n" +
-		"      regex: .*\\n" +
-		"  rooms: []\\n" +
-		"  aliases: []\\n"
+	namespaces := as.Namespaces
+	if namespaces == nil {
+		namespaces = &b.ApplicationServiceNamespaces{
+			Users: []b.ApplicationServiceNamespace{{Regex: ".*"}},
+		}
+	}
+	registration := applicationServiceRegistration{
+		ID:                     as.ID,
+		HSToken:                as.HSToken,
+		ASToken:                as.ASToken,
+		URL:                    as.URL,
+		SenderLocalpart:        as.SenderLocalpart,
+		RateLimited:            as.RateLimited,
+		LegacyPushEphemeral:    as.SendEphemeral,
+		PushEphemeral:          as.SendEphemeral,
+		ReceiveEphemeral:       as.SendEphemeral,
+		EnableEncryption:       as.EnableEncryption,
+		EnableDeviceManagement: as.EnableMSC4190,
+		Namespaces: applicationServiceNamespaces{
+			Users:   applicationServiceNamespaceList(namespaces.Users),
+			Rooms:   applicationServiceNamespaceList(namespaces.Rooms),
+			Aliases: applicationServiceNamespaceList(namespaces.Aliases),
+		},
+		Protocols: append([]string(nil), as.Protocols...),
+	}
+	data, err := yaml.Marshal(registration)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal appservice registration %q: %v", as.ID, err))
+	}
+	return string(data)
+}
+
+func applicationServiceNamespaceList(namespaces []b.ApplicationServiceNamespace) []applicationServiceNamespace {
+	result := make([]applicationServiceNamespace, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		result = append(result, applicationServiceNamespace{
+			Regex: namespace.Regex, Exclusive: namespace.Exclusive,
+		})
+	}
+	return result
 }
 
 // createNetworkIfNotExists creates a docker network and returns its name.

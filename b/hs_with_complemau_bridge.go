@@ -17,10 +17,20 @@ const (
 	// ComplemauASPort is the fixed TCP port the mautrix receiver listens on.
 	// It must match the port embedded in ComplemauASURL below.
 	ComplemauASPort = 49973
+	// ComplemauSecondASID is the registration id for the flag-off receiver.
+	ComplemauSecondASID = "complemau-off"
+	// ComplemauSecondSender is the second registration's sender localpart.
+	ComplemauSecondSender = "complemau_off"
+	// ComplemauSecondSenderID is the second sender user on hs1.
+	ComplemauSecondSenderID = "@complemau_off:hs1"
+	// ComplemauSecondASPort is the fixed port for the second receiver.
+	ComplemauSecondASPort = 49974
 	// ComplemauASURL is where the homeserver pushes transactions. The host is
 	// COMPLEMENT_HOSTNAME_RUNNING_COMPLEMENT (host.docker.internal), which the
 	// testee container resolves to the host running the test via host-gateway.
 	ComplemauASURL = "http://host.docker.internal:49973"
+	// ComplemauSecondASURL is where the second receiver accepts transactions.
+	ComplemauSecondASURL = "http://host.docker.internal:49974"
 )
 
 // BlueprintHSWithComplemauBridge is one homeserver (hs1) with a single local
@@ -45,6 +55,47 @@ var BlueprintHSWithComplemauBridge = MustValidate(Blueprint{
 					SenderLocalpart: ComplemauSender,
 					RateLimited:     false,
 					SendEphemeral:   true,
+				},
+			},
+		},
+	},
+})
+
+// BlueprintHSWithTwoComplemauBridges registers two overlapping appservices.
+// The first opts into ephemeral, MSC3202, and MSC4190 behavior. The second
+// leaves those registration flags off, allowing tests to compare delivery and
+// verify that one stalled receiver does not block the other.
+var BlueprintHSWithTwoComplemauBridges = MustValidate(Blueprint{
+	Name: "hs_with_two_complemau_bridges",
+	Homeservers: []Homeserver{
+		{
+			Name: "hs1",
+			Users: []User{
+				{
+					Localpart:   "@alice",
+					DisplayName: "Alice",
+				},
+			},
+			ApplicationServices: []ApplicationService{
+				{
+					ID:               ComplemauASID,
+					URL:              ComplemauASURL,
+					SenderLocalpart:  ComplemauSender,
+					SendEphemeral:    true,
+					EnableEncryption: true,
+					EnableMSC4190:    true,
+					Namespaces: &ApplicationServiceNamespaces{
+						Users: []ApplicationServiceNamespace{{Regex: "^@complemau_.*:hs1$"}},
+					},
+					Protocols: []string{"complemau"},
+				},
+				{
+					ID:              ComplemauSecondASID,
+					URL:             ComplemauSecondASURL,
+					SenderLocalpart: ComplemauSecondSender,
+					Namespaces: &ApplicationServiceNamespaces{
+						Users: []ApplicationServiceNamespace{{Regex: "^@complemau_.*:hs1$"}},
+					},
 				},
 			},
 		},
