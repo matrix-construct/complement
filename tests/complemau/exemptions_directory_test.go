@@ -18,6 +18,37 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+// complemauDirectoryExclusionBlueprint mirrors BlueprintHSWithComplemauBridge but
+// scopes its appservice to an exclusive users namespace covering only this test's
+// ghosts (@as_directory*:hs1). Under the shared blueprint's non-exclusive `.*`
+// namespace the ghost is indistinguishable from the marker user, so the directory
+// filter cannot drop the ghost without also dropping the marker.
+var complemauDirectoryExclusionBlueprint = b.MustValidate(b.Blueprint{
+	Name: "hs_with_complemau_directory_bridge",
+	Homeservers: []b.Homeserver{
+		{
+			Name: "hs1",
+			Users: []b.User{
+				{Localpart: "@alice", DisplayName: "Alice"},
+			},
+			ApplicationServices: []b.ApplicationService{
+				{
+					ID:              b.ComplemauASID,
+					URL:             b.ComplemauASURL,
+					SenderLocalpart: b.ComplemauSender,
+					RateLimited:     false,
+					SendEphemeral:   true,
+					Namespaces: &b.ApplicationServiceNamespaces{
+						Users: []b.ApplicationServiceNamespace{
+							{Regex: `^@as_directory.*:hs1$`, Exclusive: true},
+						},
+					},
+				},
+			},
+		},
+	},
+})
+
 func TestComplemauDirectoryExcludesAppserviceUsers(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite)
 
@@ -56,14 +87,15 @@ func TestComplemauDirectoryExcludesAppserviceUsers(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			deployment := complement.OldDeploy(t, b.BlueprintHSWithComplemauBridge)
+			deployment := complement.OldDeploy(t, complemauDirectoryExclusionBlueprint)
 			defer deployment.Destroy(t)
 
 			searcher := deployment.Register(t, "hs1", helpers.RegistrationOpts{
 				LocalpartSuffix: "directorysearcher",
 			})
 			bridgeClient := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
-			bridge := startComplemauBridge(t, bridgeClient.BaseURL)
+			registration := complemauDirectoryExclusionBlueprint.Homeservers[0].ApplicationServices[0]
+			bridge := startComplemauBridgeWithRegistration(t, bridgeClient.BaseURL, registration, b.ComplemauASPort)
 			defer bridge.stop()
 			bridge.ensureReady(t)
 
