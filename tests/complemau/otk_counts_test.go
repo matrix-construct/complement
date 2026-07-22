@@ -319,16 +319,6 @@ func TestComplemauAppserviceServesDeviceKeysOverFederation(t *testing.T) {
 	bridge.mustCreateGhostDevice(t, ghostUserID, localDevice, "Federated local device")
 	uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, localDevice, 0, false)
 
-	// Tuwunel currently serves its database copy directly to federation. The
-	// strict receive is the known failure until the MSC3984 merge is added.
-	request := bridge.mustReceiveEndpointRequest(t, complemauKeyQuery, complemauE2EKeyTimeout)
-	assertComplemauE2EEndpointRequest(
-		t,
-		request,
-		"/_matrix/app/unstable/org.matrix.msc3984/keys/query",
-		map[string]interface{}{ghostUserID: nil},
-		registration.HSToken,
-	)
 	remote.MustSyncUntil(t, client.SyncReq{Since: since}, func(_ string, sync gjson.Result) error {
 		for _, userID := range sync.Get("device_lists.changed").Array() {
 			if userID.Str == ghostUserID {
@@ -345,6 +335,16 @@ func TestComplemauAppserviceServesDeviceKeysOverFederation(t *testing.T) {
 		client.WithJSONBody(t, map[string]interface{}{
 			"device_keys": map[string]interface{}{ghostUserID: []string{}},
 		}),
+	)
+	// The remote client query reaches hs1 over federation before hs1 proxies to
+	// the appservice.
+	request := bridge.mustReceiveEndpointRequest(t, complemauKeyQuery, complemauE2EKeyTimeout)
+	assertComplemauE2EEndpointRequest(
+		t,
+		request,
+		"/_matrix/app/unstable/org.matrix.msc3984/keys/query",
+		map[string]interface{}{ghostUserID: []string{}},
+		registration.HSToken,
 	)
 	body := client.ParseJSON(t, response)
 	devices := gjson.GetBytes(body, "device_keys."+client.GjsonEscape(ghostUserID))
