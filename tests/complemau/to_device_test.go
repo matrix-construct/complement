@@ -17,7 +17,10 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
-const complemauToDeviceTimeout = 60 * time.Second
+const (
+	complemauToDeviceTimeout     = 60 * time.Second
+	complemauToDeviceQuietWindow = time.Second
+)
 
 func TestComplemauAppserviceReceivesToDevice(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite)
@@ -485,6 +488,28 @@ func assertComplemauToDeviceBurst(
 	seen := make(map[string]string, len(expected))
 	seenTransactions := make(map[string]*complemauTransaction)
 	observedCap := 0
+	var terminalTransaction string
+	var quietTimer *time.Timer
+	var quiet <-chan time.Time
+	resetQuiet := func() {
+		if quietTimer == nil {
+			quietTimer = time.NewTimer(complemauToDeviceQuietWindow)
+			quiet = quietTimer.C
+			return
+		}
+		if !quietTimer.Stop() {
+			select {
+			case <-quietTimer.C:
+			default:
+			}
+		}
+		quietTimer.Reset(complemauToDeviceQuietWindow)
+	}
+	defer func() {
+		if quietTimer != nil {
+			quietTimer.Stop()
+		}
+	}()
 	timer := time.NewTimer(complemauToDeviceTimeout)
 	defer timer.Stop()
 	for {
@@ -492,6 +517,9 @@ func assertComplemauToDeviceBurst(
 		case transaction, ok := <-transactions:
 			if !ok {
 				t.Fatalf("complemau: transaction drain closed after %d of %d to-device messages", len(seen), len(expected))
+			}
+			if terminalTransaction != "" {
+				resetQuiet()
 			}
 			if previous, replay := seenTransactions[transaction.ID]; replay {
 				if !reflect.DeepEqual(previous.Body, transaction.Body) {
@@ -519,6 +547,14 @@ func assertComplemauToDeviceBurst(
 			for _, got := range events {
 				marker, _ := got.Content.Raw["complemau_case"].(string)
 				if marker == terminalMarker {
+					if terminalTransaction != "" && terminalTransaction != transaction.ID {
+						t.Fatalf(
+							"complemau: terminal marker appeared in transactions %s and %s",
+							terminalTransaction,
+							transaction.ID,
+						)
+					}
+					terminalTransaction = transaction.ID
 					reachedTerminal = true
 					continue
 				}
@@ -558,8 +594,10 @@ func assertComplemauToDeviceBurst(
 						len(expected),
 					)
 				}
-				return observedCap
+				resetQuiet()
 			}
+		case <-quiet:
+			return observedCap
 		case <-timer.C:
 			t.Fatalf(
 				"complemau: received %d of %d to-device messages before the deadline",
