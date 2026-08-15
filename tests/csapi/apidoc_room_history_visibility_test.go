@@ -2,6 +2,8 @@ package csapi_tests
 
 import (
 	"net/http"
+	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -152,6 +154,77 @@ func TestFetchHistoricalSharedEvent(t *testing.T) {
 			match.JSONKeyTypeEqual("origin_server_ts", gjson.Number),
 		},
 	})
+}
+
+func TestSharedHistoryAfterLeaving(t *testing.T) {
+	deployment := complement.Deploy(t, 1)
+	defer deployment.Destroy(t)
+
+	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+	bob := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+
+	roomID := createRoomWithVisibility(t, alice, "shared")
+	m0 := alice.SendEventSynced(t, roomID, b.Event{
+		Type: "m.room.message",
+		Content: map[string]interface{}{
+			"msgtype": "m.text",
+			"body":    "before Bob joined",
+		},
+	})
+
+	alice.MustInviteRoom(t, roomID, bob.UserID)
+	bob.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(bob.UserID, roomID))
+
+	mInvited := alice.SendEventSynced(t, roomID, b.Event{
+		Type: "m.room.message",
+		Content: map[string]interface{}{
+			"msgtype": "m.text",
+			"body":    "while Bob was invited",
+		},
+	})
+
+	bob.MustJoinRoom(t, roomID, nil)
+	alice.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(bob.UserID, roomID))
+
+	m1 := alice.SendEventSynced(t, roomID, b.Event{
+		Type: "m.room.message",
+		Content: map[string]interface{}{
+			"msgtype": "m.text",
+			"body":    "while Bob was joined",
+		},
+	})
+
+	bob.MustLeaveRoom(t, roomID)
+	alice.MustSyncUntil(t, client.SyncReq{}, client.SyncLeftFrom(bob.UserID, roomID))
+
+	m2 := alice.SendEventSynced(t, roomID, b.Event{
+		Type: "m.room.message",
+		Content: map[string]interface{}{
+			"msgtype": "m.text",
+			"body":    "after Bob left",
+		},
+	})
+
+	res := bob.MustDo(
+		t,
+		"GET",
+		[]string{"_matrix", "client", "v3", "rooms", roomID, "messages"},
+		client.WithQueries(url.Values{
+			"dir":   []string{"b"},
+			"limit": []string{"100"},
+		}),
+	)
+	eventIDs := extractEventIDsFromMessagesResponse(t, client.ParseJSON(t, res))
+
+	for _, eventID := range []string{m0, mInvited, m1} {
+		if !slices.Contains(eventIDs, eventID) {
+			t.Fatalf("shared history omitted event %s after the user left", eventID)
+		}
+	}
+
+	if slices.Contains(eventIDs, m2) {
+		t.Fatalf("shared history exposed post-leave event %s", m2)
+	}
 }
 
 // Tries to fetch an event between being invited and joined, and succeeds.
