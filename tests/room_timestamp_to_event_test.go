@@ -360,6 +360,9 @@ func createTestRoom(t *testing.T, c *client.CSAPI) (roomID string, eventA, event
 		"preset": "public_chat",
 	})
 
+	// timeBeforeEventA doubles as the room creation's after-timestamp, so guard
+	// it on both sides to keep it between the creation events and Message A.
+	time.Sleep(tsBoundaryGuard)
 	timeBeforeEventA := time.Now()
 	time.Sleep(tsBoundaryGuard)
 	eventAID := c.SendEventSynced(t, roomID, b.Event{
