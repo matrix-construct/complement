@@ -28,6 +28,12 @@ type complementOpts struct {
 }
 type opt func(*complementOpts)
 
+type deployOpts struct {
+	extraEnv []string
+}
+
+type deployOpt func(*deployOpts)
+
 // WithCleanup adds a cleanup function which is called prior to terminating the test suite.
 // It is called BEFORE Complement containers are destroyed.
 // This function should be used for per-suite cleanup operations e.g tearing down containers, killing
@@ -49,6 +55,22 @@ func WithDeployment(fn func(t ct.TestLike, numServers int, config *config.Comple
 	return func(co *complementOpts) {
 		co.customDeployment = fn
 	}
+}
+
+// WithEnv adds environment variables to the homeservers in one deployment.
+func WithEnv(env ...string) deployOpt {
+	env = append([]string(nil), env...)
+	return func(opts *deployOpts) {
+		opts.extraEnv = append(opts.extraEnv, env...)
+	}
+}
+
+func resolveDeployOpts(opts ...deployOpt) deployOpts {
+	var resolved deployOpts
+	for _, opt := range opts {
+		opt(&resolved)
+	}
+	return resolved
 }
 
 // TestMain is the main entry point for Complement.
@@ -110,13 +132,16 @@ func OldDeploy(t ct.TestLike, blueprint b.Blueprint) Deployment {
 //
 // For test consistency and compatibility, deployers should be creating servers that can
 // be referred to as `hs1`, `hs2`, etc as the `hsName` in the `Deployment` interface.
-func Deploy(t ct.TestLike, numServers int) Deployment {
+func Deploy(t ct.TestLike, numServers int, opts ...deployOpt) Deployment {
 	t.Helper()
 	if testPackage == nil {
 		ct.Fatalf(t, "Deploy: testPackage not set, did you forget to call complement.TestMain?")
 	}
 	if customDeployer != nil {
+		if len(opts) != 0 {
+			ct.Fatalf(t, "Deploy: deployment options cannot be used with a custom deployer")
+		}
 		return customDeployer(t, numServers, testPackage.Config)
 	}
-	return testPackage.Deploy(t, numServers)
+	return testPackage.Deploy(t, numServers, opts...)
 }
