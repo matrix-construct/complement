@@ -151,9 +151,9 @@ func (tp *TestPackage) OldDeploy(t ct.TestLike, blueprint b.Blueprint) Deploymen
 	return dep
 }
 
-func (tp *TestPackage) Deploy(t ct.TestLike, numServers int) Deployment {
+func (tp *TestPackage) Deploy(t ct.TestLike, numServers int, opts ...deployOpt) Deployment {
 	t.Helper()
-	if tp.Config.EnableDirtyRuns {
+	if tp.Config.EnableDirtyRuns && len(opts) == 0 {
 		return tp.dirtyDeploy(t, numServers)
 	}
 	// non-dirty deployments below
@@ -163,7 +163,8 @@ func (tp *TestPackage) Deploy(t ct.TestLike, numServers int) Deployment {
 		ct.Fatalf(t, "Deploy: Failed to construct blueprint: %s", err)
 	}
 	namespace := fmt.Sprintf("%d", atomic.AddUint64(&tp.namespaceCounter, 1))
-	d, err := docker.NewDeployer(namespace, tp.complementBuilder.Config)
+	resolvedOpts := resolveDeployOpts(opts...)
+	d, err := docker.NewDeployer(namespace, tp.complementBuilder.Config, resolvedOpts.extraEnv...)
 	if err != nil {
 		ct.Fatalf(t, "Deploy: NewDeployer returned error %s", err)
 	}

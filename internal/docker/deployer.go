@@ -53,9 +53,10 @@ type Deployer struct {
 	Counter         int
 	debugLogging    bool
 	config          *config.Complement
+	extraEnv        []string
 }
 
-func NewDeployer(deployNamespace string, cfg *config.Complement) (*Deployer, error) {
+func NewDeployer(deployNamespace string, cfg *config.Complement, extraEnv ...string) (*Deployer, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -68,6 +69,7 @@ func NewDeployer(deployNamespace string, cfg *config.Complement) (*Deployer, err
 		Docker:          cli,
 		debugLogging:    cfg.DebugLoggingEnabled,
 		config:          cfg,
+		extraEnv:        append([]string(nil), extraEnv...),
 	}, nil
 }
 
@@ -96,7 +98,7 @@ func (d *Deployer) CreateDirtyServer(hsName string) (*HomeserverDeployment, erro
 	hsDeployment, err := deployImage(
 		d.Docker, baseImageURI, containerName,
 		d.config.PackageNamespace, "", hsName, nil, "dirty",
-		networkName, d.config,
+		networkName, d.config, d.extraEnv,
 	)
 	if err != nil {
 		if hsDeployment != nil && hsDeployment.ContainerID != "" {
@@ -195,6 +197,7 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
 		deployment, err := deployImage(
 			d.Docker, img.ID, containerName,
 			d.config.PackageNamespace, blueprintName, hsName, asIDToRegistrationMap, contextStr, networkName, d.config,
+			d.extraEnv,
 		)
 		if err != nil {
 			if deployment != nil && deployment.ContainerID != "" {
@@ -350,9 +353,25 @@ func (d *Deployer) StartServer(hsDep *HomeserverDeployment) error {
 }
 
 // nolint
+func buildContainerEnv(hsName string, cfg *config.Complement, extraEnv []string) []string {
+	env := []string{
+		"SERVER_NAME=" + hsName,
+	}
+	if cfg.EnvVarsPropagatePrefix != "" {
+		for _, ev := range os.Environ() {
+			if strings.HasPrefix(ev, cfg.EnvVarsPropagatePrefix) {
+				env = append(env, strings.TrimPrefix(ev, cfg.EnvVarsPropagatePrefix))
+			}
+		}
+		log.Printf("Sharing %v host environment variables with container", env)
+	}
+	return append(env, extraEnv...)
+}
+
 func deployImage(
 	docker *client.Client, imageID string, containerName, pkgNamespace, blueprintName, hsName string,
 	asIDToRegistrationMap map[string]string, contextStr, networkName string, cfg *config.Complement,
+	extraEnv []string,
 ) (*HomeserverDeployment, error) {
 	ctx := context.Background()
 	var extraHosts []string
@@ -379,17 +398,7 @@ func deployImage(
 		log.Printf("Using host mounts: %+v", mounts)
 	}
 
-	env := []string{
-		"SERVER_NAME=" + hsName,
-	}
-	if cfg.EnvVarsPropagatePrefix != "" {
-		for _, ev := range os.Environ() {
-			if strings.HasPrefix(ev, cfg.EnvVarsPropagatePrefix) {
-				env = append(env, strings.TrimPrefix(ev, cfg.EnvVarsPropagatePrefix))
-			}
-		}
-		log.Printf("Sharing %v host environment variables with container", env)
-	}
+	env := buildContainerEnv(hsName, cfg, extraEnv)
 
 	capAdd := append([]string{"NET_ADMIN"}, cfg.TesteeCapAdd...)
 
