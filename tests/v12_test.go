@@ -929,7 +929,7 @@ func TestMSC4297StateResolutionV2_1_starts_from_empty_set(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite) // needs additional fixes
 	// Venator: does not yet implement federation
 	runtime.SkipIf(t, runtime.Venator)
-	deployment := complement.Deploy(t, 1)
+	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY=false"))
 	defer deployment.Destroy(t)
 	srv := federation.NewServer(t, deployment,
 		federation.HandleKeyRequests(),
@@ -1112,7 +1112,7 @@ func TestMSC4297StateResolutionV2_1_includes_conflicted_subgraph(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite) // needs additional fixes
 	// Venator: does not yet implement federation
 	runtime.SkipIf(t, runtime.Venator)
-	deployment := complement.Deploy(t, 1)
+	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY=false"))
 	defer deployment.Destroy(t)
 	srv := federation.NewServer(t, deployment,
 		federation.HandleKeyRequests(),
