@@ -289,7 +289,7 @@ func timelineEventIDs(t *testing.T, c *client.CSAPI, roomID string) map[string]b
 // In every arrival order the correct outcome is the same: probe integrates,
 // mallory stays banned, and no state fetch happens.
 func TestGapFillingUnauthorizedStateEvent(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
@@ -370,7 +370,7 @@ func TestGapFillingUnauthorizedStateEvent(t *testing.T) {
 // ancestors are kept out of state" from "gap-filled ancestors never make it
 // into state".
 func TestGapFillingAuthorizedStateEvent(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
@@ -428,7 +428,7 @@ func TestGapFillingAuthorizedStateEvent(t *testing.T) {
 // authorized event, keep the unauthorized run out of timeline and state, and
 // never fetch /state_ids.
 func TestGapFillingDeepChain(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
@@ -571,7 +571,7 @@ func TestGapFillingDeepChain(t *testing.T) {
 // The two contributions land on different state tuples, so nothing about the
 // outcome depends on a timestamp or event ID tie-break.
 func TestGapFillingForkResolution(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
@@ -681,7 +681,7 @@ func TestGapFillingForkResolution(t *testing.T) {
 //	join -+- ban (mallory)                       -+   delivered first
 //	      +- rejoin (mallory) - name (charlie)   -+- merge   (delivered via /send)
 func TestGapFillingDroppedStateEventDependents(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
@@ -811,7 +811,7 @@ type manufacturedGap struct {
 //	join -+- trunk: ban, or a topic in the control        -+   delivered first
 //	      +- opener - mallory's message - closer          -+- sentinel   (via /send)
 func TestGapFillingManufacturedGapSoftFail(t *testing.T) {
-	deployment := complement.Deploy(t, 1, complement.WithEnv("TUWUNEL_RESOLVE_STATE_LOCALLY_SHADOW=false"))
+	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
