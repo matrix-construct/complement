@@ -724,6 +724,23 @@ func (bridge *complemauBridge) mustReceiveEndpointRequest(
 	return mustPopComplemau(t, route.requests, timeout, "an appservice endpoint request")
 }
 
+func (bridge *complemauBridge) mustNotReceiveEndpointRequest(
+	t *testing.T,
+	endpoint complemauEndpoint,
+	timeout time.Duration,
+) {
+	t.Helper()
+	route, ok := bridge.routes[endpoint]
+	if !ok {
+		t.Fatalf("complemau: unknown appservice endpoint %q", endpoint)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if _, ok := route.requests.pop(ctx); ok {
+		t.Fatalf("complemau: unexpectedly received an appservice endpoint request for %q", endpoint)
+	}
+}
+
 func (bridge *complemauBridge) mustCreateGhostDevice(
 	t *testing.T,
 	userID string,

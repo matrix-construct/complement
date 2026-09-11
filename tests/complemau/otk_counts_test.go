@@ -25,9 +25,26 @@ import (
 
 const complemauE2EKeyTimeout = 10 * time.Second
 
-var complemauE2EKeyFederationBlueprint = func() b.Blueprint {
-	return newComplemauInterestBlueprint("hs_with_complemau_e2e_key_federation", true)
-}()
+var (
+	complemauE2EKeyBlueprint = newComplemauE2EKeyBlueprint(
+		"hs_with_complemau_e2e_key",
+		false,
+	)
+	complemauE2EKeyNonexclusiveBlueprint = newComplemauInterestBlueprint(
+		"hs_with_complemau_e2e_key_nonexclusive",
+		false,
+	)
+	complemauE2EKeyFederationBlueprint = newComplemauE2EKeyBlueprint(
+		"hs_with_complemau_e2e_key_federation",
+		true,
+	)
+)
+
+func newComplemauE2EKeyBlueprint(name string, federated bool) b.Blueprint {
+	blueprint := newComplemauInterestBlueprint(name, federated)
+	blueprint.Homeservers[0].ApplicationServices[0].Namespaces.Users[0].Exclusive = true
+	return blueprint
+}
 
 func TestComplemauAppserviceReceivesOTKCountsAndFallbackKeys(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite)
@@ -187,17 +204,19 @@ func TestComplemauAppserviceServesOneTimeKeys(t *testing.T) {
 
 func TestComplemauAppserviceServesDeviceKeys(t *testing.T) {
 	runtime.SkipIf(t, runtime.Dendrite)
+	assertComplemauNonexclusiveDeviceKeysSkipped(t)
 
-	deployment := complement.OldDeploy(t, b.BlueprintHSWithComplemauBridge)
+	deployment := complement.OldDeploy(t, complemauE2EKeyBlueprint)
 	defer deployment.Destroy(t)
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
 	bridgeUser := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
-	bridge := startComplemauBridge(t, bridgeUser.BaseURL)
+	registration := complemauE2EKeyBlueprint.Homeservers[0].ApplicationServices[0]
+	bridge := startComplemauBridgeWithRegistration(t, bridgeUser.BaseURL, registration, b.ComplemauASPort)
 	defer bridge.stop()
 
 	const (
-		ghostUserID      = "@complemau_key_query:hs1"
+		ghostUserID      = "@as_key_query:hs1"
 		localDevice      = "LOCAL_ONLY"
 		overriddenDevice = "AS_OVERRIDE"
 		appserviceDevice = "AS_ONLY"
@@ -227,15 +246,13 @@ func TestComplemauAppserviceServesDeviceKeys(t *testing.T) {
 		}),
 	)
 
-	// Tuwunel currently never makes this MSC3984 request. This receive is the
-	// deliberate known failure until appservice device-key queries are wired.
 	request := bridge.mustReceiveEndpointRequest(t, complemauKeyQuery, complemauE2EKeyTimeout)
 	assertComplemauE2EEndpointRequest(
 		t,
 		request,
 		"/_matrix/app/unstable/org.matrix.msc3984/keys/query",
 		map[string]interface{}{ghostUserID: []string{}},
-		b.BlueprintHSWithComplemauBridge.Homeservers[0].ApplicationServices[0].HSToken,
+		registration.HSToken,
 	)
 
 	body := client.ParseJSON(t, response)
@@ -257,6 +274,45 @@ func TestComplemauAppserviceServesDeviceKeys(t *testing.T) {
 		t,
 		json.RawMessage(devices.Get(client.GjsonEscape(appserviceDevice)).Raw),
 		appserviceKeys,
+	)
+	assertComplemauEmptyFailures(t, body)
+}
+
+func assertComplemauNonexclusiveDeviceKeysSkipped(t *testing.T) {
+	deployment := complement.OldDeploy(t, complemauE2EKeyNonexclusiveBlueprint)
+	defer deployment.Destroy(t)
+
+	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
+	bridgeUser := deployment.AppServiceUser(t, "hs1", b.ComplemauSenderID)
+	registration := complemauE2EKeyNonexclusiveBlueprint.Homeservers[0].ApplicationServices[0]
+	bridge := startComplemauBridgeWithRegistration(t, bridgeUser.BaseURL, registration, b.ComplemauASPort)
+	defer bridge.stop()
+
+	const (
+		ghostUserID = "@as_nonexclusive_key_query:hs1"
+		localDevice = "LOCAL_ONLY"
+	)
+	bridge.mustCreateGhostDevice(t, ghostUserID, localDevice, "Local device")
+	localKeys, _ := uploadComplemauOTKMaterial(t, bridgeUser, ghostUserID, localDevice, 0, false)
+	response := alice.MustDo(
+		t,
+		http.MethodPost,
+		[]string{"_matrix", "client", "v3", "keys", "query"},
+		client.WithJSONBody(t, map[string]interface{}{
+			"device_keys": map[string]interface{}{ghostUserID: []string{}},
+		}),
+	)
+
+	bridge.mustNotReceiveEndpointRequest(t, complemauKeyQuery, time.Second)
+	body := client.ParseJSON(t, response)
+	devices := gjson.GetBytes(body, "device_keys."+client.GjsonEscape(ghostUserID))
+	if !devices.IsObject() || len(devices.Map()) != 1 {
+		t.Fatalf("complemau: nonexclusive device keys were %s, want exactly one local device", devices.Raw)
+	}
+	assertComplemauDeviceKeyEqual(
+		t,
+		json.RawMessage(devices.Get(client.GjsonEscape(localDevice)).Raw),
+		localKeys,
 	)
 	assertComplemauEmptyFailures(t, body)
 }
