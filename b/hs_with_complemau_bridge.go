@@ -50,11 +50,12 @@ var BlueprintHSWithComplemauBridge = MustValidate(Blueprint{
 			},
 			ApplicationServices: []ApplicationService{
 				{
-					ID:              ComplemauASID,
-					URL:             ComplemauASURL,
-					SenderLocalpart: ComplemauSender,
-					RateLimited:     false,
-					SendEphemeral:   true,
+					ID:               ComplemauASID,
+					URL:              ComplemauASURL,
+					SenderLocalpart:  ComplemauSender,
+					RateLimited:      false,
+					SendEphemeral:    true,
+					EnableKeysClaims: true,
 				},
 			},
 		},
@@ -62,9 +63,9 @@ var BlueprintHSWithComplemauBridge = MustValidate(Blueprint{
 })
 
 // BlueprintHSWithTwoComplemauBridges registers two overlapping appservices.
-// The first opts into ephemeral, MSC3202, and MSC4190 behavior. The second
-// leaves those registration flags off, allowing tests to compare delivery and
-// verify that one stalled receiver does not block the other.
+// The first opts into ephemeral, MSC3202, MSC4190, and MSC3983 behavior. The
+// second leaves those registration flags off, allowing tests to compare
+// delivery and verify that one stalled receiver does not block the other.
 var BlueprintHSWithTwoComplemauBridges = MustValidate(Blueprint{
 	Name: "hs_with_two_complemau_bridges",
 	Homeservers: []Homeserver{
@@ -84,6 +85,7 @@ var BlueprintHSWithTwoComplemauBridges = MustValidate(Blueprint{
 					SendEphemeral:    true,
 					EnableEncryption: true,
 					EnableMSC4190:    true,
+					EnableKeysClaims: true,
 					Namespaces: &ApplicationServiceNamespaces{
 						Users: []ApplicationServiceNamespace{{Regex: "^@complemau_.*:hs1$"}},
 					},

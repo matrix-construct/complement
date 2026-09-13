@@ -2,6 +2,7 @@ package docker
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,7 @@ func TestASRegistrationLabelRoundTrip(t *testing.T) {
 		SendEphemeral:    true,
 		EnableEncryption: true,
 		EnableMSC4190:    true,
+		EnableKeysClaims: true,
 		Namespaces: &b.ApplicationServiceNamespaces{
 			Users: []b.ApplicationServiceNamespace{
 				{Regex: `^@bridge_["'\\]+` + literalBackslashN + `:hs$`, Exclusive: true},
@@ -58,6 +60,9 @@ func TestASRegistrationLabelRoundTrip(t *testing.T) {
 	}
 	if !registration.EphemeralEvents || !registration.SoruEphemeralEvents || !registration.MSC3202 || !registration.MSC4190 {
 		t.Errorf("registration flags changed during label round trip: %+v", registration)
+	}
+	if !strings.Contains(registrationYAML, "keys_claims: true") {
+		t.Errorf("keys_claims flag missing from the registration label:\n%s", registrationYAML)
 	}
 	if !reflect.DeepEqual(registration.Protocols, source.Protocols) {
 		t.Errorf("protocols changed during label round trip: got %q want %q", registration.Protocols, source.Protocols)
