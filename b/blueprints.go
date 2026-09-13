@@ -105,6 +105,7 @@ type ApplicationService struct {
 	SendEphemeral    bool
 	EnableEncryption bool
 	EnableMSC4190    bool
+	EnableKeysClaims bool
 	Namespaces       *ApplicationServiceNamespaces
 	Protocols        []string
 }

@@ -445,6 +445,7 @@ type applicationServiceRegistration struct {
 	ReceiveEphemeral       bool                         `yaml:"receive_ephemeral"`
 	EnableEncryption       bool                         `yaml:"org.matrix.msc3202"`
 	EnableDeviceManagement bool                         `yaml:"io.element.msc4190"`
+	EnableKeysClaims       bool                         `yaml:"keys_claims"`
 	Namespaces             applicationServiceNamespaces `yaml:"namespaces"`
 	Protocols              []string                     `yaml:"protocols,omitempty"`
 }
@@ -468,6 +469,7 @@ func generateASRegistrationYaml(as b.ApplicationService) string {
 		ReceiveEphemeral:       as.SendEphemeral,
 		EnableEncryption:       as.EnableEncryption,
 		EnableDeviceManagement: as.EnableMSC4190,
+		EnableKeysClaims:       as.EnableKeysClaims,
 		Namespaces: applicationServiceNamespaces{
 			Users:   applicationServiceNamespaceList(namespaces.Users),
 			Rooms:   applicationServiceNamespaceList(namespaces.Rooms),
