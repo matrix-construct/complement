@@ -15,6 +15,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/netip"
@@ -159,15 +160,13 @@ func (d *Builder) removeContainers() error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, c := range containers.Items {
-		_, err = d.Docker.ContainerRemove(context.Background(), c.ID, client.ContainerRemoveOptions{
-			Force: true,
-		})
-		if err != nil {
-			return err
+		if err := removeContainer(d.Docker, c.ID); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (d *Builder) ConstructBlueprintIfNotExist(bprint b.Blueprint) error {
@@ -257,9 +256,7 @@ func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
 				// something went wrong, but we have a container which may have interesting logs
 				printLogs(d.Docker, res.containerID, res.contextStr)
 			}
-			if _, delErr := d.Docker.ContainerRemove(context.Background(), res.containerID, client.ContainerRemoveOptions{
-				Force: true,
-			}); delErr != nil {
+			if delErr := removeContainer(d.Docker, res.containerID); delErr != nil {
 				d.log("%s: failed to remove container which failed to deploy: %s", res.contextStr, delErr)
 			}
 			// there is little point continuing to set up the remaining homeservers at this point
@@ -329,10 +326,9 @@ func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
 		// If we don't do this, then e.g. Postgres databases can become corrupt, which
 		// then incurs a slow recovery process when we use the blueprint later.
 		d.log("%s: Stopping container: %s", res.contextStr, res.containerID)
-		tenSeconds := 10
-		d.Docker.ContainerStop(context.Background(), res.containerID, client.ContainerStopOptions{
-			Timeout: &tenSeconds,
-		})
+		if err := stopContainer(d.Docker, res.containerID, 10); err != nil {
+			log.Printf("%s: Failed to stop container %s: %s\n", res.contextStr, res.containerID, err)
+		}
 
 		// Log again so we can see the timings.
 		d.log("%s: Stopped container: %s", res.contextStr, res.containerID)

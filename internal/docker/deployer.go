@@ -46,6 +46,11 @@ const (
 	MountAppServicePath = "/complement/appservice/" // All registration files sit here
 )
 
+const (
+	// containerExitWait bounds the wait for a container which dockerd failed to stop.
+	containerExitWait = 5 * time.Minute
+)
+
 type Deployer struct {
 	DeployNamespace string
 	Docker          *client.Client
@@ -245,10 +250,7 @@ func (d *Deployer) PrintLogs(dep *Deployment) {
 // performs (metric dumps, profile output, embedded-db flushes).
 func (d *Deployer) Destroy(dep *Deployment, printServerLogs bool, testName string, failed bool) {
 	for _, hsDep := range dep.HS {
-		timeoutSecs := int(d.config.DestroyHSTimeout.Seconds())
-		_, err := d.Docker.ContainerStop(context.Background(), hsDep.ContainerID, client.ContainerStopOptions{
-			Timeout: &timeoutSecs,
-		})
+		err := stopContainer(d.Docker, hsDep.ContainerID, int(d.config.DestroyHSTimeout.Seconds()))
 		if err != nil {
 			log.Printf("Destroy: Failed to stop container %s : %s\n", hsDep.ContainerID, err)
 		}
@@ -265,12 +267,57 @@ func (d *Deployer) Destroy(dep *Deployment, printServerLogs bool, testName strin
 			log.Printf("Post test script result: %s", string(result))
 		}
 
-		_, err = d.Docker.ContainerRemove(context.Background(), hsDep.ContainerID, client.ContainerRemoveOptions{
-			Force: true,
-		})
+		err = removeContainer(d.Docker, hsDep.ContainerID)
 		if err != nil {
 			log.Printf("Destroy: Failed to remove container %s : %s\n", hsDep.ContainerID, err)
 		}
+	}
+}
+
+// stopContainer stops a container, escalating to SIGKILL after timeoutSecs. dockerd gives
+// up on a container whose process cannot finish exiting, so wait for the exit itself: the
+// container must not be used again until it is gone.
+func stopContainer(docker *client.Client, containerID string, timeoutSecs int) error {
+	_, err := docker.ContainerStop(context.Background(), containerID, client.ContainerStopOptions{
+		Timeout: &timeoutSecs,
+	})
+	if err == nil {
+		return nil
+	}
+	log.Printf("Waiting for container %s to exit after a failed stop: %s\n", containerID, err)
+	if waitErr := awaitContainerExit(docker, containerID); waitErr != nil {
+		return fmt.Errorf("%w: waiting for exit: %w", err, waitErr)
+	}
+	return nil
+}
+
+// removeContainer force removes a container, waiting for the exit of one which dockerd
+// cannot kill yet.
+func removeContainer(docker *client.Client, containerID string) error {
+	opts := client.ContainerRemoveOptions{Force: true}
+	_, err := docker.ContainerRemove(context.Background(), containerID, opts)
+	if err == nil {
+		return nil
+	}
+	log.Printf("Waiting for container %s to exit after a failed remove: %s\n", containerID, err)
+	if waitErr := awaitContainerExit(docker, containerID); waitErr != nil {
+		return fmt.Errorf("%w: waiting for exit: %w", err, waitErr)
+	}
+	_, err = docker.ContainerRemove(context.Background(), containerID, opts)
+	return err
+}
+
+func awaitContainerExit(docker *client.Client, containerID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), containerExitWait)
+	defer cancel()
+	wait := docker.ContainerWait(ctx, containerID, client.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
+	select {
+	case <-wait.Result:
+		return nil
+	case err := <-wait.Error:
+		return err
 	}
 }
 
@@ -302,12 +349,8 @@ func (d *Deployer) UnpauseServer(hsDep *HomeserverDeployment) error {
 }
 
 func (d *Deployer) StopServer(hsDep *HomeserverDeployment) error {
-	ctx := context.Background()
 	secs := int(d.config.SpawnHSTimeout.Seconds())
-	_, err := d.Docker.ContainerStop(ctx, hsDep.ContainerID, client.ContainerStopOptions{
-		Timeout: &secs,
-	})
-	if err != nil {
+	if err := stopContainer(d.Docker, hsDep.ContainerID, secs); err != nil {
 		return fmt.Errorf("failed to stop container %s: %s", hsDep.ContainerID, err)
 	}
 	return nil
