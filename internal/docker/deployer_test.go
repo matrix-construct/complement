@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -32,6 +33,7 @@ type fakeDaemon struct {
 	t        *testing.T
 	statuses map[string][]int
 	calls    []string
+	body     json.RawMessage
 }
 
 func (f *fakeDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +46,11 @@ func (f *fakeDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.statuses[action] = queued[1:]
+	if action == "create" {
+		if err := json.NewDecoder(r.Body).Decode(&f.body); err != nil {
+			f.t.Errorf("decoding %s: %s", r.URL, err)
+		}
+	}
 	w.WriteHeader(queued[0])
 	if action == "wait" && queued[0] == http.StatusOK {
 		w.Write([]byte(`{"StatusCode":137}`))
@@ -180,5 +187,28 @@ func TestRemoveContainer(t *testing.T) {
 				t.Errorf("daemon calls = %v, want %v", daemon.calls, tc.wantCalls)
 			}
 		})
+	}
+}
+
+func TestDeployImageSetsStopTimeout(t *testing.T) {
+	daemon := &fakeDaemon{
+		t:        t,
+		statuses: map[string][]int{"create": {http.StatusInternalServerError}},
+	}
+
+	_, err := deployImage(
+		daemon.client(), "image", "testee", "pkg", "blueprint", "hs1",
+		nil, "context", "network", &config.Complement{}, nil,
+	)
+	if err == nil {
+		t.Fatal("deployImage() succeeded, want the failed create")
+	}
+
+	var created struct{ StopTimeout *int }
+	if err := json.Unmarshal(daemon.body, &created); err != nil {
+		t.Fatalf("decoding the create body: %s", err)
+	}
+	if created.StopTimeout == nil || *created.StopTimeout != containerExitGraceSecs {
+		t.Errorf("StopTimeout = %v, want %d", created.StopTimeout, containerExitGraceSecs)
 	}
 }

@@ -47,6 +47,14 @@ const (
 )
 
 const (
+	// containerExitGraceSecs is the StopTimeout of every homeserver container. When a
+	// kill finds the process already exiting, dockerd waits this long for the exit event
+	// and then records the exit itself, after which the real event is ignored and the
+	// containerd task and its shim are stranded for good. Complement's stop requests carry
+	// their own timeout, so this does not delay SIGKILL for them. It is finite because
+	// older Docker releases treat the negative "wait forever" value as already expired.
+	containerExitGraceSecs = 3600
+
 	// containerExitWait bounds the wait for a container which dockerd failed to stop.
 	containerExitWait = 5 * time.Minute
 )
@@ -443,6 +451,7 @@ func deployImage(
 	env := buildContainerEnv(hsName, cfg, extraEnv)
 
 	capAdd := append([]string{"NET_ADMIN"}, cfg.TesteeCapAdd...)
+	stopTimeout := containerExitGraceSecs
 
 	body, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
@@ -456,6 +465,7 @@ func deployImage(
 				"complement_hs_name":   hsName,
 				runIDLabel:             cfg.RunID,
 			},
+			StopTimeout: &stopTimeout,
 		},
 		HostConfig: &container.HostConfig{
 			CapAdd: capAdd,
