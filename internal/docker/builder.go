@@ -335,8 +335,10 @@ func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
 
 		// commit the container
 		commit, err := d.Docker.ContainerCommit(context.Background(), res.containerID, client.ContainerCommitOptions{
-			Author:    "Complement",
-			NoPause:   false,
+			Author: "Complement",
+			// The container has stopped, or it is still exiting after a stop which timed out.
+			// Pausing that one could leave it frozen, and runc can then refuse to delete the task.
+			NoPause:   true,
 			Reference: "localhost/complement_" + d.Config.RunID + ":" + res.contextStr,
 			Changes:   toChanges(labels),
 
