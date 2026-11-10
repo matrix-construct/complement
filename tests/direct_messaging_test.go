@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -130,16 +131,21 @@ func TestIsDirectFlagFederation(t *testing.T) {
 			"is_direct":  true,
 		},
 	})
-	inviteReq, err := fclient.NewInviteV2Request(dmInviteEvent, []gomatrixserverlib.InviteStrippedState{})
-	if err != nil {
-		t.Fatalf("failed to make invite request: %s", err)
-	}
 	_, since := alice.MustSync(t, client.SyncReq{})
-	fedClient := srv.FederationClient(deployment)
-	_, err = fedClient.SendInviteV2(context.Background(), srv.ServerName(), deployment.GetFullyQualifiedHomeserverName(t, "hs1"), inviteReq)
-	if err != nil {
-		t.Fatalf("failed to send invite v2: %s", err)
-	}
+
+	// `invite_room_state` must carry the full `m.room.create` event (MSC4311), which
+	// `fclient.NewInviteV2Request(...)` cannot send, so the request is built here.
+	invitePath := "/_matrix/federation/v2/invite/" + url.PathEscape(room.RoomID) + "/" + url.PathEscape(dmInviteEvent.EventID())
+	inviteReq := fclient.NewFederationRequest("PUT", srv.ServerName(), deployment.GetFullyQualifiedHomeserverName(t, "hs1"), invitePath)
+	err := inviteReq.SetContent(map[string]interface{}{
+		"event":             dmInviteEvent,
+		"invite_room_state": []gomatrixserverlib.PDU{room.CurrentState("m.room.create", "")},
+		"room_version":      roomVer,
+	})
+	must.NotError(t, "failed to set invite request body", err)
+	res, err := srv.DoFederationRequest(context.Background(), t, deployment, inviteReq)
+	must.NotError(t, "failed to send invite v2", err)
+	must.MatchResponse(t, res, match.HTTPResponse{StatusCode: 200})
 
 	alice.MustSyncUntil(t, client.SyncReq{Since: since}, func(clientUserID string, topLevelSyncJSON gjson.Result) error {
 		inviteStateEvents := topLevelSyncJSON.Get("rooms.invite." + client.GjsonEscape(room.RoomID) + ".invite_state.events").Array()
