@@ -103,12 +103,12 @@ func TestComplemauPingRoundTripAndAuthorization(t *testing.T) {
 	}
 
 	t.Run("normal user is forbidden", func(t *testing.T) {
-		// Tuwunel rejects ordinary access tokens as unauthorized. Appservice
-		// tokens for a different appservice reach the self-only check below.
+		// The spec answers a token that does not belong to an appservice with
+		// 403 M_FORBIDDEN, as Synapse does.
 		res := pingComplemauAppservice(t, alice, complemauPingSuccessID, "normal_user_ping")
 		must.MatchResponse(t, res, match.HTTPResponse{
-			StatusCode: http.StatusUnauthorized,
-			JSON:       []match.JSON{match.JSONKeyEqual("errcode", "M_UNAUTHORIZED")},
+			StatusCode: http.StatusForbidden,
+			JSON:       []match.JSON{match.JSONKeyEqual("errcode", "M_FORBIDDEN")},
 		})
 	})
 
