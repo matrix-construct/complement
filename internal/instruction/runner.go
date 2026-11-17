@@ -290,13 +290,13 @@ func (r *Runner) next(instrs []instruction, hsURL string, i int) (*http.Request,
 		req.Header["Content-Type"] = []string{"application/json"}
 	}
 
-	q := req.URL.Query()
 	if instr.accessToken != "" {
 		at, ok := r.lookup.Load(instr.accessToken)
 		if ok {
-			q.Set("access_token", at.(string))
+			req.Header.Set("Authorization", "Bearer "+at.(string))
 		}
 	}
+	q := req.URL.Query()
 	for paramName, paramValue := range instr.queryParams {
 		// if the variable starts with a '.' then use the lookup table, else use the string literally
 		// this handles scenarios like:
